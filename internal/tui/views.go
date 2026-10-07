@@ -271,6 +271,8 @@ BROWSER
 
 COPILOT
   c                         show / hide the pane
+  m                         maximize the pane, filling the body (from the
+                            browser); esc or tab restores the split
   tab                       move between browser and copilot
   enter                     send your question
   esc                       cancel a running request / back to the browser

@@ -80,7 +80,8 @@ prints what is in effect (never the key).
 | `?` | help |
 | `q`, `ctrl+c` | quit |
 
-**Copilot**: `c` shows/hides the pane, `tab` moves between browser and copilot,
+**Copilot**: `c` shows/hides the pane, `m` maximizes it to fill the body
+(`esc` or `tab` restores the split), `tab` moves between browser and copilot,
 `enter` sends, `esc` cancels a running request, `ctrl+l` starts a new
 conversation. It is told what you are looking at (context, namespace, type,
 selected resource) with every question, so "this pod" just works.

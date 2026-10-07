@@ -110,18 +110,26 @@ func (m *Model) viewCopilot(w, h int) string {
 	return b.String()
 }
 
+// leaveCopilot returns focus to the browser. If the copilot was maximized, the
+// split is restored first, so the browser is visible when it takes the
+// keyboard — never a focused but hidden pane.
+func (m *Model) leaveCopilot() {
+	m.pane = paneBrowser
+	m.input.Blur()
+	m.copilotMax = false
+	m.layout()
+}
+
 func (m *Model) onCopilotKey(msg tea.KeyMsg) tea.Cmd {
 	switch msg.String() {
 	case "tab":
-		m.pane = paneBrowser
-		m.input.Blur()
+		m.leaveCopilot()
 		return nil
 	case "esc":
 		if m.pending != nil {
 			// A proposal is waiting: esc must not throw it away. Deciding
 			// (or quitting) is the way to end it.
-			m.pane = paneBrowser
-			m.input.Blur()
+			m.leaveCopilot()
 			m.status = "a proposal is waiting for your decision — ctrl+p shows it"
 			return nil
 		}
@@ -130,8 +138,7 @@ func (m *Model) onCopilotKey(msg tea.KeyMsg) tea.Cmd {
 			m.say(chatNotice, "Cancelling…")
 			return nil
 		}
-		m.pane = paneBrowser
-		m.input.Blur()
+		m.leaveCopilot()
 		return nil
 	case "pgup", "pgdown", "ctrl+u", "ctrl+d":
 		var cmd tea.Cmd

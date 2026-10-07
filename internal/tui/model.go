@@ -161,17 +161,20 @@ type Model struct {
 
 	// copilot
 	copilotOpen bool
-	transcript  []chatItem
-	chat        viewport.Model
-	input       textinput.Model
-	busy        bool
-	spin        spinner.Model
-	turnCancel  context.CancelFunc
-	events      chan agent.Event
-	closed      chan struct{}
-	wg          sync.WaitGroup
-	shutdown    sync.Once
-	activity    string
+	// copilotMax gives the copilot the whole body instead of the split. It is
+	// entered with m from the browser; leaving the copilot restores the split.
+	copilotMax bool
+	transcript []chatItem
+	chat       viewport.Model
+	input      textinput.Model
+	busy       bool
+	spin       spinner.Model
+	turnCancel context.CancelFunc
+	events     chan agent.Event
+	closed     chan struct{}
+	wg         sync.WaitGroup
+	shutdown   sync.Once
+	activity   string
 
 	// approval
 	pending *approval.Request
@@ -495,8 +498,13 @@ func (m *Model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.input.Focus()
 	case "c":
 		m.copilotOpen = !m.copilotOpen
+		if !m.copilotOpen {
+			m.copilotMax = false
+		}
 		m.layout()
 		return m, nil
+	case "m":
+		return m, m.toggleMaximize()
 	case "p":
 		if m.pending != nil {
 			m.modal.hidden = false
@@ -617,15 +625,41 @@ func (m *Model) copilotWidth() int {
 	if !m.copilotOpen {
 		return 0
 	}
+	if m.copilotMax {
+		return m.width
+	}
 	return clamp(m.width*42/100, 34, 80)
 }
 
 func (m *Model) browserInner() (w, h int) {
-	return m.width - m.copilotWidth() - 2, m.height - 2 - 2
+	h = m.height - 2 - 2
+	if m.copilotMax {
+		// Maximized: the browser is not rendered, so it gets no width.
+		return 0, h
+	}
+	return m.width - m.copilotWidth() - 2, h
 }
 
 func (m *Model) copilotInner() (w, h int) {
 	return m.copilotWidth() - 2, m.height - 2 - 2
+}
+
+// toggleMaximize gives the copilot the whole body, or restores the split. It
+// is entered with m from the browser. While the copilot input is focused, m is
+// an ordinary character, so the way back is esc or tab (see leaveCopilot).
+func (m *Model) toggleMaximize() tea.Cmd {
+	if m.copilotMax {
+		m.copilotMax = false
+		m.pane = paneBrowser
+		m.input.Blur()
+		m.layout()
+		return nil
+	}
+	m.copilotOpen = true
+	m.copilotMax = true
+	m.pane = paneCopilot
+	m.layout()
+	return m.input.Focus()
 }
 
 // --- view -------------------------------------------------------------------
@@ -640,6 +674,16 @@ func (m *Model) View() string {
 	}
 	if m.pending != nil && !m.modal.hidden {
 		return m.viewModal()
+	}
+
+	if m.copilotMax {
+		cw, ch := m.copilotInner()
+		cstyle := stPane
+		if m.pane == paneCopilot {
+			cstyle = stPaneFocused
+		}
+		body := cstyle.Width(cw).Height(ch).MaxHeight(ch + 2).MaxWidth(cw + 2).Render(m.viewCopilot(cw, ch))
+		return m.viewHeader() + "\n" + body + "\n" + m.viewFooter()
 	}
 
 	bw, bh := m.browserInner()
@@ -725,13 +769,13 @@ func (m *Model) viewFooter() string {
 			h = hints("enter", "send", "tab/esc", "browser", "pgup/pgdn", "scroll", "ctrl+l", "new conversation", "ctrl+c", "quit")
 		}
 	case m.view == vList:
-		h = hints("↑↓", "move", "enter", "detail", "l", "logs", "e", "events", "n", "namespace", "t", "type", "/", "filter", "r", "refresh", "c", "copilot", "tab", "ask", "?", "help", "q", "quit")
+		h = hints("↑↓", "move", "enter", "detail", "l", "logs", "e", "events", "n", "namespace", "t", "type", "/", "filter", "r", "refresh", "c", "copilot", "m", "maximize", "tab", "ask", "?", "help", "q", "quit")
 	case m.view == vLogs:
-		h = hints("f", "follow", "s", "container", "v", "previous", "↑↓", "scroll", "esc", "back", "tab", "ask", "q", "quit")
+		h = hints("f", "follow", "s", "container", "v", "previous", "↑↓", "scroll", "esc", "back", "m", "maximize", "tab", "ask", "q", "quit")
 	case m.view == vDetail:
-		h = hints("↑↓", "scroll", "l", "logs", "e", "events", "esc", "back", "tab", "ask", "q", "quit")
+		h = hints("↑↓", "scroll", "l", "logs", "e", "events", "esc", "back", "m", "maximize", "tab", "ask", "q", "quit")
 	default:
-		h = hints("↑↓", "scroll", "r", "reload", "esc", "back", "tab", "ask", "q", "quit")
+		h = hints("↑↓", "scroll", "r", "reload", "esc", "back", "m", "maximize", "tab", "ask", "q", "quit")
 	}
 	return clip(h, m.width)
 }

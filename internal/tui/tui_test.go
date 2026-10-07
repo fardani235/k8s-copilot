@@ -430,6 +430,63 @@ func TestCopilotToggleKeepsBrowserState(t *testing.T) {
 	}
 }
 
+// Maximize: m from the browser gives the copilot the whole body and focuses
+// it; esc and tab restore the split with the browser's state intact.
+func TestCopilotMaximizeAndRestore(t *testing.T) {
+	u := newUI(t, fakeCluster(), nil)
+	u.keys("down") // select web-2
+	u.keys("/")
+	u.typeText("web")
+	u.keys("enter") // filter the listing
+	before := u.m.deps.Focus.Get()
+
+	// m maximizes a hidden copilot, fills the body, and focuses it.
+	u.keys("m")
+	u.want("copilot", "The copilot is not available")
+	u.wantNot("pods · namespace shop")
+	if u.m.pane != paneCopilot || !u.m.copilotMax || !u.m.copilotOpen {
+		t.Fatalf("maximize did not focus the copilot: pane=%v max=%v open=%v", u.m.pane, u.m.copilotMax, u.m.copilotOpen)
+	}
+
+	// esc restores the split and leaves the browser exactly as it was.
+	u.keys("esc")
+	u.want("pods · namespace shop")
+	if u.m.pane != paneBrowser || u.m.copilotMax {
+		t.Fatalf("esc did not restore the split: pane=%v max=%v", u.m.pane, u.m.copilotMax)
+	}
+	if u.m.filter != "web" {
+		t.Fatalf("filter lost across maximize: %q", u.m.filter)
+	}
+	if row, _ := u.m.selectedRow(); row.Name != "web-2" {
+		t.Fatalf("selection lost across maximize: %+v", row)
+	}
+	if after := u.m.deps.Focus.Get(); after != before {
+		t.Fatalf("browser focus changed:\nbefore %+v\nafter  %+v", before, after)
+	}
+
+	// tab restores it too.
+	u.keys("m")
+	if !u.m.copilotMax {
+		t.Fatal("m did not maximize on the second press")
+	}
+	u.keys("tab")
+	if u.m.pane != paneBrowser || u.m.copilotMax {
+		t.Fatalf("tab did not restore the split: pane=%v max=%v", u.m.pane, u.m.copilotMax)
+	}
+
+	// An open sub-view survives maximize and restore as well.
+	u.keys("enter")
+	if u.m.view != vDetail {
+		t.Fatalf("enter did not open detail: %v", u.m.view)
+	}
+	u.keys("m")
+	u.keys("esc")
+	if u.m.view != vDetail {
+		t.Fatalf("sub-view lost across maximize: %v", u.m.view)
+	}
+	u.want("detail")
+}
+
 // --- copilot + approval -------------------------------------------------------
 
 type copilotUI struct {
