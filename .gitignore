@@ -2,3 +2,6 @@
 /k8s-copilot
 *.test
 *.out
+
+# opencode tooling and local project memory
+.opencode/
