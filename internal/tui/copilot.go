@@ -10,10 +10,10 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/fardani235/k2stui/internal/agent"
-	"github.com/fardani235/k2stui/internal/audit"
-	"github.com/fardani235/k2stui/internal/textutil"
-	"github.com/fardani235/k2stui/internal/tools"
+	"github.com/fardani235/k8s-copilot/internal/agent"
+	"github.com/fardani235/k8s-copilot/internal/audit"
+	"github.com/fardani235/k8s-copilot/internal/textutil"
+	"github.com/fardani235/k8s-copilot/internal/tools"
 )
 
 type chatKind int

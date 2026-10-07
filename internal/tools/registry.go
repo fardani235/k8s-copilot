@@ -21,7 +21,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/fardani235/k2stui/internal/kube"
+	"github.com/fardani235/k8s-copilot/internal/kube"
 )
 
 // Tier classifies a tool.
@@ -131,10 +131,10 @@ type UnknownToolError struct {
 func (e *UnknownToolError) Error() string {
 	msg := fmt.Sprintf("unknown tool %q; nothing was executed.", e.Name)
 	if what := unsupportedOperation(e.Name); what != "" {
-		msg = fmt.Sprintf("refused: %s is outside the set of changes k2stui supports, and no tool for it exists; nothing was executed.", what)
+		msg = fmt.Sprintf("refused: %s is outside the set of changes k8s-copilot supports, and no tool for it exists; nothing was executed.", what)
 	}
 	return msg + " The only tools are: " + strings.Join(e.Available, ", ") +
-		". k2stui cannot delete resources, apply or patch arbitrary manifests, change container images, exec into containers, or cordon/drain nodes." +
+		". k8s-copilot cannot delete resources, apply or patch arbitrary manifests, change container images, exec into containers, or cordon/drain nodes." +
 		" If one of those is needed, explain it to the user so they can do it themselves."
 }
 

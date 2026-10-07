@@ -11,8 +11,8 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
-	"github.com/fardani235/k2stui/internal/kube"
-	"github.com/fardani235/k2stui/internal/textutil"
+	"github.com/fardani235/k8s-copilot/internal/kube"
+	"github.com/fardani235/k8s-copilot/internal/textutil"
 )
 
 const (
@@ -245,13 +245,13 @@ func (r *Registry) redact(o *unstructured.Unstructured) *unstructured.Unstructur
 			continue
 		}
 		for k := range m {
-			m[k] = "<redacted by k2stui>"
+			m[k] = "<redacted by k8s-copilot>"
 		}
 		_ = unstructured.SetNestedMap(c.Object, m, field)
 	}
 	ann := c.GetAnnotations()
 	if _, ok := ann["kubectl.kubernetes.io/last-applied-configuration"]; ok {
-		ann["kubectl.kubernetes.io/last-applied-configuration"] = "<redacted by k2stui>"
+		ann["kubectl.kubernetes.io/last-applied-configuration"] = "<redacted by k8s-copilot>"
 		c.SetAnnotations(ann)
 	}
 	return c

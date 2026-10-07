@@ -1,4 +1,4 @@
 /bin/
-/k2stui
+/k8s-copilot
 *.test
 *.out

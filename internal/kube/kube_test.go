@@ -20,8 +20,8 @@ import (
 	"k8s.io/client-go/discovery"
 	clienttesting "k8s.io/client-go/testing"
 
-	"github.com/fardani235/k2stui/internal/kube"
-	"github.com/fardani235/k2stui/internal/kube/kubetest"
+	"github.com/fardani235/k8s-copilot/internal/kube"
+	"github.com/fardani235/k8s-copilot/internal/kube/kubetest"
 )
 
 func writeKubeconfig(t *testing.T, path, current, server string, contexts ...string) {

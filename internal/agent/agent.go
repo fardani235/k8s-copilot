@@ -18,11 +18,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/fardani235/k2stui/internal/approval"
-	"github.com/fardani235/k2stui/internal/audit"
-	"github.com/fardani235/k2stui/internal/kube"
-	"github.com/fardani235/k2stui/internal/llm"
-	"github.com/fardani235/k2stui/internal/tools"
+	"github.com/fardani235/k8s-copilot/internal/approval"
+	"github.com/fardani235/k8s-copilot/internal/audit"
+	"github.com/fardani235/k8s-copilot/internal/kube"
+	"github.com/fardani235/k8s-copilot/internal/llm"
+	"github.com/fardani235/k8s-copilot/internal/tools"
 )
 
 // Focus is what the user is looking at in the browser. It is sent with every
@@ -108,7 +108,7 @@ type (
 		Detail  string
 		Audited bool
 	}
-	// EventNotice is a message from k2stui itself (limits, audit problems).
+	// EventNotice is a message from k8s-copilot itself (limits, audit problems).
 	EventNotice struct {
 		Text    string
 		Warning bool
@@ -180,7 +180,7 @@ func (a *Agent) Reset() bool {
 // ErrBusy is reported when a request is already running.
 var ErrBusy = errors.New("the copilot is still working on the previous request")
 
-const systemPrompt = `You are the copilot inside k2stui, a terminal Kubernetes browser. An engineer is looking at a live cluster and asks you questions about it. You investigate with the tools and explain what you find.
+const systemPrompt = `You are the copilot inside k8s-copilot, a terminal Kubernetes browser. An engineer is looking at a live cluster and asks you questions about it. You investigate with the tools and explain what you find.
 
 How to work
 - Investigate before answering. Use describe_resource, get_logs (previous=true for a container that keeps restarting), get_events, get_resource and list_resources, and follow the trail: pod → owner → config → node. Do not guess when you can look.

@@ -3,9 +3,9 @@
 One Go binary. No server component, nothing installed in the cluster.
 
 ```
-cmd/k2stui            wiring: config → cluster → audit → provider → agent → UI
+cmd/k8s-copilot       wiring: config → cluster → audit → provider → agent → UI
 internal/
-  config              defaults < file < K2STUI_* env < flags
+  config              defaults < file < K8S_COPILOT_* env < flags
   kube                the ONLY package that talks to the Kubernetes API
     connect.go          kubeconfig resolution, clients, start-up probe
     types.go            discovery, type resolution (pods / po / Pod / pods.group)
@@ -136,7 +136,7 @@ entry's canonical encoding, which includes `prev_hash`). Verification checks
 that every stored line is byte-for-byte the canonical encoding of what it
 parses to, that it matches its hash, that it follows its predecessor, and that
 the log has not been cut short relative to a small `audit.jsonl.head` anchor
-(last seq + hash). Appends take an OS file lock, so two k2stui processes can
+(last seq + hash). Appends take an OS file lock, so two k8s-copilot processes can
 share a file without forking the chain.
 
 Entry fields: time, session, proposal id, **intent** (your words), model,

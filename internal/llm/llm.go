@@ -1,7 +1,7 @@
-// Package llm is the boundary between k2stui's agent loop and whichever model
+// Package llm is the boundary between k8s-copilot's agent loop and whichever model
 // provider is configured.
 //
-// The loop is owned by k2stui (internal/agent). A provider does exactly one
+// The loop is owned by k8s-copilot (internal/agent). A provider does exactly one
 // thing: take the conversation so far and return the model's next message —
 // text, tool calls, or both. It never executes a tool and never loops. That
 // is what lets the loop stop between "the model asked for a change" and "the

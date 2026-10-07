@@ -19,7 +19,7 @@ func parse(t *testing.T, e map[string]string, args ...string) Config {
 	if e == nil {
 		e = map[string]string{}
 	}
-	if _, ok := e["K2STUI_CONFIG"]; !ok && !contains(args, "--config") {
+	if _, ok := e["K8S_COPILOT_CONFIG"]; !ok && !contains(args, "--config") {
 		args = append(args, "--config", emptyConfig(t))
 	}
 	inv, err := Parse(args, env(e), io.Discard)
@@ -49,7 +49,7 @@ func TestDefaults(t *testing.T) {
 	c := parse(t, nil)
 	if c.Provider != "anthropic" || c.KeyEnv() != "ANTHROPIC_API_KEY" || c.RefreshInterval != 5*time.Second ||
 		c.MaxIterations != 12 || c.MaxToolCalls != 30 || c.Context != "" || c.Kubeconfig != "" ||
-		!c.RedactSecrets || c.MaxReplicas != 100 || !strings.HasSuffix(c.AuditFile, filepath.Join("k2stui", "audit.jsonl")) {
+		!c.RedactSecrets || c.MaxReplicas != 100 || !strings.HasSuffix(c.AuditFile, filepath.Join("k8s-copilot", "audit.jsonl")) {
 		t.Fatalf("defaults: %+v", c)
 	}
 }
@@ -78,7 +78,7 @@ request_timeout: 45s
 		t.Fatalf("from file: %+v", c)
 	}
 
-	e := map[string]string{"K2STUI_CONFIG": path, "K2STUI_MODEL": "from-env", "K2STUI_MAX_ITERATIONS": "7", "K2STUI_CONTEXT": "env-ctx", "K2STUI_REFRESH_INTERVAL": "off"}
+	e := map[string]string{"K8S_COPILOT_CONFIG": path, "K8S_COPILOT_MODEL": "from-env", "K8S_COPILOT_MAX_ITERATIONS": "7", "K8S_COPILOT_CONTEXT": "env-ctx", "K8S_COPILOT_REFRESH_INTERVAL": "off"}
 	c = parse(t, e)
 	if c.Model != "from-env" || c.MaxIterations != 7 || c.Context != "env-ctx" || c.RefreshInterval != 0 || c.Provider != "openrouter" {
 		t.Fatalf("env over file: %+v", c)
@@ -108,9 +108,9 @@ func TestRejectsBadConfiguration(t *testing.T) {
 	bad("unknown provider", "unknown provider", nil, "--provider", "skynet")
 	bad("zero iterations", "max_iterations", nil, "--max-iterations", "0")
 	bad("refresh too fast", "refresh_interval", nil, "--refresh", "10ms")
-	bad("bad env number", "not a number", map[string]string{"K2STUI_MAX_TOOL_CALLS": "lots"})
+	bad("bad env number", "not a number", map[string]string{"K8S_COPILOT_MAX_TOOL_CALLS": "lots"})
 	bad("stray argument", "unexpected argument", nil, "pods")
-	bad("missing explicit config", "cannot read config file", nil, "--config", "/nonexistent/k2stui.yaml")
+	bad("missing explicit config", "cannot read config file", nil, "--config", "/nonexistent/k8s-copilot.yaml")
 
 	// A typo in the file is an error, not a silently ignored setting — and a
 	// key in the file gets a pointed message.

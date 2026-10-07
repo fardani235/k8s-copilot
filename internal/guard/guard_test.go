@@ -140,7 +140,7 @@ func TestOnlyKubePackageTalksToTheAPI(t *testing.T) {
 					continue
 				}
 				// main only silences client-go's warning output.
-				if s.rel == "cmd/k2stui/main.go" && im == "k8s.io/client-go/rest" {
+				if s.rel == "cmd/k8s-copilot/main.go" && im == "k8s.io/client-go/rest" {
 					continue
 				}
 				t.Errorf("%s imports %q: only internal/kube may talk to the cluster", s.rel, im)

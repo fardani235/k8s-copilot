@@ -15,10 +15,10 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	clienttesting "k8s.io/client-go/testing"
 
-	"github.com/fardani235/k2stui/internal/approval"
-	"github.com/fardani235/k2stui/internal/kube"
-	"github.com/fardani235/k2stui/internal/kube/kubetest"
-	"github.com/fardani235/k2stui/internal/tools"
+	"github.com/fardani235/k8s-copilot/internal/approval"
+	"github.com/fardani235/k8s-copilot/internal/kube"
+	"github.com/fardani235/k8s-copilot/internal/kube/kubetest"
+	"github.com/fardani235/k8s-copilot/internal/tools"
 )
 
 var ctx = context.Background()
@@ -264,7 +264,7 @@ func TestReadTools(t *testing.T) {
 	if strings.Contains(out, "aHVudGVyMg") || strings.Contains(out, "hunter2") {
 		t.Fatalf("secret value leaked to the model:\n%s", out)
 	}
-	if !strings.Contains(out, "password: <redacted by k2stui>") {
+	if !strings.Contains(out, "password: <redacted by k8s-copilot>") {
 		t.Errorf("redaction marker missing:\n%s", out)
 	}
 

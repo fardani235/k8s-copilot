@@ -10,9 +10,9 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/fardani235/k2stui/internal/audit"
-	"github.com/fardani235/k2stui/internal/kube"
-	"github.com/fardani235/k2stui/internal/textutil"
+	"github.com/fardani235/k8s-copilot/internal/audit"
+	"github.com/fardani235/k8s-copilot/internal/kube"
+	"github.com/fardani235/k8s-copilot/internal/textutil"
 )
 
 // openSubject opens a sub-view for the selected row (from the list) or for
@@ -253,7 +253,7 @@ func FormatAudit(path string, rep audit.Report) string {
 
 func helpText() string {
 	return strings.TrimSpace(`
-k2stui browses the cluster of your current kubeconfig context and has a
+k8s-copilot browses the cluster of your current kubeconfig context and has a
 copilot that can investigate for you.
 
 BROWSER

@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/fardani235/k2stui/internal/approval"
-	"github.com/fardani235/k2stui/internal/audit"
-	"github.com/fardani235/k2stui/internal/kube"
-	"github.com/fardani235/k2stui/internal/llm"
-	"github.com/fardani235/k2stui/internal/tools"
+	"github.com/fardani235/k8s-copilot/internal/approval"
+	"github.com/fardani235/k8s-copilot/internal/audit"
+	"github.com/fardani235/k8s-copilot/internal/kube"
+	"github.com/fardani235/k8s-copilot/internal/llm"
+	"github.com/fardani235/k8s-copilot/internal/tools"
 )
 
 // DeclinedByUser is the tool result for a rejected proposal.
@@ -24,10 +24,10 @@ func (a *Agent) mutate(ctx context.Context, call llm.ToolCall, intent string, em
 	// No record, no change: without a working audit trail nothing is even
 	// proposed.
 	if a.cfg.Audit == nil {
-		return "refused: the audit trail is not available, so k2stui will not propose changes. Tell the user; the read tools still work.", true
+		return "refused: the audit trail is not available, so k8s-copilot will not propose changes. Tell the user; the read tools still work.", true
 	}
 	if err := a.cfg.Audit.Healthy(); err != nil {
-		return fmt.Sprintf("refused: %v, so k2stui will not propose changes. Tell the user; the read tools still work.", err), true
+		return fmt.Sprintf("refused: %v, so k8s-copilot will not propose changes. Tell the user; the read tools still work.", err), true
 	}
 
 	args := call.Args
@@ -111,7 +111,7 @@ func (a *Agent) entry(p *tools.Plan, intent string) audit.Entry {
 func (a *Agent) record(e audit.Entry, emit func(Event)) bool {
 	if _, err := a.cfg.Audit.Append(e); err != nil {
 		emit(EventNotice{Warning: true, Text: fmt.Sprintf(
-			"AUDIT FAILURE: could not record %s on %s %s (outcome: %s): %v. This action is NOT in the audit trail. k2stui will propose no further changes until this is fixed and it is restarted.",
+			"AUDIT FAILURE: could not record %s on %s %s (outcome: %s): %v. This action is NOT in the audit trail. k8s-copilot will propose no further changes until this is fixed and it is restarted.",
 			e.Tool, e.Target.Kind, qualified(e.Target.Namespace, e.Target.Name), e.Outcome.Status, err)})
 		return false
 	}
@@ -157,7 +157,7 @@ func (a *Agent) apply(ctx context.Context, p *tools.Plan, grant *approval.Grant,
 	ahead.Outcome.Detail = "approved; the request is about to be sent. The next entry for this proposal records the result — if there is none, the result is unknown: check the cluster"
 	if !a.record(ahead, emit) {
 		emit(EventProposalClosed{ID: p.ID, Title: p.Title, Outcome: audit.OutcomeFailed, Detail: "the audit trail could not be written, so the change was not sent"})
-		return "not applied: approved by the user, but the audit trail could not be written, and k2stui does not act unrecorded.", true
+		return "not applied: approved by the user, but the audit trail could not be written, and k8s-copilot does not act unrecorded.", true
 	}
 
 	// The human said yes: carry the request through even if the turn is

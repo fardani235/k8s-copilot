@@ -1,6 +1,6 @@
 # Safety and security model
 
-The promise: **k2stui can look at anything you can; it never changes anything
+The promise: **k8s-copilot can look at anything you can; it never changes anything
 unless you approved that exact change.** This document says what enforces
 that, what was considered, and — just as important — where the guarantees
 stop.
@@ -47,7 +47,7 @@ gets tired.
   decision keys stay on screen and no line is hidden behind the hint.
 - **The model's reason is labelled as unverified.** Everything else in the
   dialog — target, before→after, dry-run verdict, reversibility, warnings, the
-  exact request (`x`) — is computed by k2stui from the cluster and the typed
+  exact request (`x`) — is computed by k8s-copilot from the cluster and the typed
   arguments.
 - **Honest reversibility.** `rollout_restart` is shown as *not undoable* (it is
   non-destructive, but you cannot un-restart pods). Scale-to-zero, `Recreate`
@@ -65,7 +65,7 @@ gets tired.
   `rollout_restart`.
 - `scale` and `rollout_restart` check the *resolved* API group and resource
   (`apps` / deployments…), so a look-alike CRD cannot be targeted.
-- `protected_namespaces` (config, empty by default) makes k2stui refuse to
+- `protected_namespaces` (config, empty by default) makes k8s-copilot refuse to
   propose anything in the listed namespaces.
 
 ## Threats considered
@@ -96,7 +96,7 @@ bidirectional-override characters are removed.
 **Data sent to the model provider.** Whatever the agent reads is sent to the
 provider you configured. To limit that:
 
-- Secret `data` / `stringData` values are replaced with `<redacted by k2stui>`
+- Secret `data` / `stringData` values are replaced with `<redacted by k8s-copilot>`
   in everything the model sees, and the `last-applied-configuration` annotation
   on Secrets (which repeats the values) is redacted too. (`redact_secrets:
   false` turns this off.) The browser itself shows Secrets as the API returns
@@ -113,7 +113,7 @@ or the conversation to another host.
 **Credentials.** The API key is read from an environment variable only; the
 config file can name the variable, never hold the key, and a config containing
 `api_key` is rejected. The key is never logged, shown, or written to the audit
-trail. Provider base URLs must be `https` unless they are loopback. k2stui uses
+trail. Provider base URLs must be `https` unless they are loopback. k8s-copilot uses
 your kubeconfig credentials as they are and asks for no additional
 permissions; if your kubeconfig uses an exec credential helper, client-go runs
 it exactly as kubectl would.
@@ -129,7 +129,7 @@ are always reported as permission errors — to you and to the model — never a
 - **Dry-run is not a guarantee.** It proves the API server accepted the request
   a moment ago. The apply can still fail (conflict, RBAC or admission change);
   that is reported, returned to the model and audited as `failed`.
-- **Race window.** Before sending, k2stui re-reads the object and refuses if it
+- **Race window.** Before sending, k8s-copilot re-reads the object and refuses if it
   is a different object (deleted and recreated) or the "before" values moved.
   Between that re-read and the patch there are a few milliseconds in which
   someone else could still change the same field; the result is then exactly
@@ -146,10 +146,10 @@ are always reported as permission errors — to you and to the model — never a
   The chain is not keyed: someone with write access to both `audit.jsonl` and
   `audit.jsonl.head` who recomputes the whole chain can forge a consistent log. Ship the file
   somewhere append-only if you need more than that.
-- **File locking** for concurrent k2stui processes sharing one audit file is
+- **File locking** for concurrent k8s-copilot processes sharing one audit file is
   implemented on Unix only.
 - **Scaling something an autoscaler or operator owns** will be undone by that
-  controller; k2stui warns when the workload has a controlling owner, but does
+  controller; k8s-copilot warns when the workload has a controlling owner, but does
   not know about HPAs.
 - **Label and annotation changes are not always harmless.** They are
   reversible, but while in place they can detach a pod from its Service or

@@ -1,4 +1,4 @@
-module github.com/fardani235/k2stui
+module github.com/fardani235/k8s-copilot
 
 go 1.26.5
 

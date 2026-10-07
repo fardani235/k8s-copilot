@@ -42,7 +42,7 @@ var Presets = map[string]Preset{
 	"anthropic":         {BaseURL: "https://api.anthropic.com", KeyEnv: "ANTHROPIC_API_KEY", Model: "claude-opus-5-5"},
 	"openai":            {BaseURL: "https://api.openai.com/v1", KeyEnv: "OPENAI_API_KEY"},
 	"openrouter":        {BaseURL: "https://openrouter.ai/api/v1", KeyEnv: "OPENROUTER_API_KEY"},
-	"openai-compatible": {KeyEnv: "K2STUI_API_KEY", KeyOptional: true},
+	"openai-compatible": {KeyEnv: "K8S_COPILOT_API_KEY", KeyOptional: true},
 }
 
 // ProviderNames lists the selectable providers.
@@ -61,7 +61,7 @@ func New(cfg Config) (Provider, error) {
 		cfg.BaseURL = preset.BaseURL
 	}
 	if cfg.BaseURL == "" {
-		return nil, fmt.Errorf("provider %q needs a base URL: set --base-url or K2STUI_BASE_URL (for example http://localhost:11434/v1)", cfg.Provider)
+		return nil, fmt.Errorf("provider %q needs a base URL: set --base-url or K8S_COPILOT_BASE_URL (for example http://localhost:11434/v1)", cfg.Provider)
 	}
 	if err := checkBaseURL(cfg.BaseURL); err != nil {
 		return nil, err
@@ -70,7 +70,7 @@ func New(cfg Config) (Provider, error) {
 		cfg.Model = preset.Model
 	}
 	if cfg.Model == "" {
-		return nil, fmt.Errorf("provider %q has no default model: set --model or K2STUI_MODEL", cfg.Provider)
+		return nil, fmt.Errorf("provider %q has no default model: set --model or K8S_COPILOT_MODEL", cfg.Provider)
 	}
 	if cfg.APIKey == "" && !preset.KeyOptional {
 		return nil, fmt.Errorf("no API key for provider %q", cfg.Provider)

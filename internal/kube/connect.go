@@ -101,7 +101,7 @@ func LoadConfig(opts ConnectOptions) (*rest.Config, Info, error) {
 	if len(raw.Contexts) == 0 {
 		return nil, Info{}, &ConfigError{Msg: fmt.Sprintf(
 			"no kubeconfig with a usable context was found (looked at: %s).\n"+
-				"k2stui connects the same way kubectl does: set KUBECONFIG or create ~/.kube/config.", searched)}
+				"k8s-copilot connects the same way kubectl does: set KUBECONFIG or create ~/.kube/config.", searched)}
 	}
 
 	name := raw.CurrentContext

@@ -1,15 +1,15 @@
 # Configuration
 
-Nothing is required. With no file, no variables and no flags, k2stui connects
+Nothing is required. With no file, no variables and no flags, k8s-copilot connects
 to your current kubeconfig context and uses Anthropic with `ANTHROPIC_API_KEY`.
 
-Precedence, lowest to highest: **defaults → config file → `K2STUI_*`
-environment → flags**. `k2stui config` prints the result.
+Precedence, lowest to highest: **defaults → config file → `K8S_COPILOT_*`
+environment → flags**. `k8s-copilot config` prints the result.
 
 ## Config file
 
-`~/.config/k2stui/config.yaml` (i.e. `$XDG_CONFIG_HOME/k2stui/config.yaml`),
-or the path in `--config` / `K2STUI_CONFIG`. Optional. Unknown keys are an
+`~/.config/k8s-copilot/config.yaml` (i.e. `$XDG_CONFIG_HOME/k8s-copilot/config.yaml`),
+or the path in `--config` / `K8S_COPILOT_CONFIG`. Optional. Unknown keys are an
 error, so typos do not pass silently.
 
 ```yaml
@@ -31,7 +31,7 @@ max_iterations: 12        # model turns
 max_tool_calls: 30        # tool calls (reads and proposals)
 
 # Safety
-audit_file: ""            # default: ~/.local/state/k2stui/audit.jsonl
+audit_file: ""            # default: ~/.local/state/k8s-copilot/audit.jsonl
 max_replicas: 100         # the most `scale` will propose
 protected_namespaces: []  # namespaces in which nothing is ever proposed
 redact_secrets: true      # hide Secret values from the model
@@ -48,12 +48,12 @@ with a message saying so.
 
 | Variable | Setting |
 |---|---|
-| `K2STUI_CONFIG` | config file path |
-| `K2STUI_KUBECONFIG`, `K2STUI_CONTEXT`, `K2STUI_NAMESPACE` | cluster |
-| `K2STUI_PROVIDER`, `K2STUI_MODEL`, `K2STUI_BASE_URL`, `K2STUI_API_KEY_ENV` | model |
-| `K2STUI_MAX_ITERATIONS`, `K2STUI_MAX_TOOL_CALLS` | bounds |
-| `K2STUI_AUDIT_FILE` | audit trail path |
-| `K2STUI_REFRESH_INTERVAL` | e.g. `10s`, `off` |
+| `K8S_COPILOT_CONFIG` | config file path |
+| `K8S_COPILOT_KUBECONFIG`, `K8S_COPILOT_CONTEXT`, `K8S_COPILOT_NAMESPACE` | cluster |
+| `K8S_COPILOT_PROVIDER`, `K8S_COPILOT_MODEL`, `K8S_COPILOT_BASE_URL`, `K8S_COPILOT_API_KEY_ENV` | model |
+| `K8S_COPILOT_MAX_ITERATIONS`, `K8S_COPILOT_MAX_TOOL_CALLS` | bounds |
+| `K8S_COPILOT_AUDIT_FILE` | audit trail path |
+| `K8S_COPILOT_REFRESH_INTERVAL` | e.g. `10s`, `off` |
 
 API key variables (the default per provider; `api_key_env` overrides the name):
 
@@ -62,7 +62,7 @@ API key variables (the default per provider; `api_key_env` overrides the name):
 | `anthropic` | `ANTHROPIC_API_KEY` |
 | `openai` | `OPENAI_API_KEY` |
 | `openrouter` | `OPENROUTER_API_KEY` |
-| `openai-compatible` | `K2STUI_API_KEY` (optional — local servers often need none) |
+| `openai-compatible` | `K8S_COPILOT_API_KEY` (optional — local servers often need none) |
 
 `KUBECONFIG` is honoured exactly as kubectl honours it.
 
@@ -84,27 +84,27 @@ API key variables (the default per provider; `api_key_env` overrides the name):
 --version
 ```
 
-Subcommands: `k2stui audit verify`, `k2stui audit show`, `k2stui config`,
-`k2stui version`. The audit subcommands accept `--audit-file` (and `--config`).
+Subcommands: `k8s-copilot audit verify`, `k8s-copilot audit show`, `k8s-copilot config`,
+`k8s-copilot version`. The audit subcommands accept `--audit-file` (and `--config`).
 
 ## Examples
 
 ```sh
 # Another context, starting in a namespace
-k2stui --context staging -n payments
+k8s-copilot --context staging -n payments
 
 # OpenRouter
 export OPENROUTER_API_KEY=…
-k2stui --provider openrouter --model <vendor/model>
+k8s-copilot --provider openrouter --model <vendor/model>
 
 # A local model: nothing leaves the machine
-k2stui --provider openai-compatible --base-url http://localhost:11434/v1 --model llama3.1
+k8s-copilot --provider openai-compatible --base-url http://localhost:11434/v1 --model llama3.1
 
 # A work key in a differently named variable
-k2stui --provider openai --model <model> --api-key-env WORK_OPENAI_KEY
+k8s-copilot --provider openai --model <model> --api-key-env WORK_OPENAI_KEY
 
 # Never propose anything in these namespaces
-cat >> ~/.config/k2stui/config.yaml <<'EOF'
+cat >> ~/.config/k8s-copilot/config.yaml <<'EOF'
 protected_namespaces: [kube-system, prod]
 EOF
 ```

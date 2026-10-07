@@ -140,17 +140,17 @@ type Log struct {
 	loaded  bool
 }
 
-// DefaultPath is $XDG_STATE_HOME/k2stui/audit.jsonl, falling back to
-// ~/.local/state/k2stui/audit.jsonl.
+// DefaultPath is $XDG_STATE_HOME/k8s-copilot/audit.jsonl, falling back to
+// ~/.local/state/k8s-copilot/audit.jsonl.
 func DefaultPath() string {
 	if d := os.Getenv("XDG_STATE_HOME"); d != "" {
-		return filepath.Join(d, "k2stui", "audit.jsonl")
+		return filepath.Join(d, "k8s-copilot", "audit.jsonl")
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "k2stui-audit.jsonl"
+		return "k8s-copilot-audit.jsonl"
 	}
-	return filepath.Join(home, ".local", "state", "k2stui", "audit.jsonl")
+	return filepath.Join(home, ".local", "state", "k8s-copilot", "audit.jsonl")
 }
 
 // Open opens (creating if needed) the audit file for appending. Existing
@@ -229,7 +229,7 @@ func (l *Log) Append(e Entry) (Entry, error) {
 }
 
 func (l *Log) append(e Entry) (Entry, error) {
-	// Another k2stui may share the file: serialise on an OS lock and pick up
+	// Another k8s-copilot may share the file: serialise on an OS lock and pick up
 	// whatever it appended so the chain stays linear.
 	unlock, err := lockFile(l.f)
 	if err != nil {
@@ -248,7 +248,7 @@ func (l *Log) append(e Entry) (Entry, error) {
 		return e, fmt.Errorf("the audit file is gone: %w", err)
 	}
 	if !os.SameFile(st, onDisk) {
-		return e, errors.New("the audit file was replaced while k2stui was running")
+		return e, errors.New("the audit file was replaced while k8s-copilot was running")
 	}
 	if st.Size() != l.size {
 		if err := l.syncTail(); err != nil {

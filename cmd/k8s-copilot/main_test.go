@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fardani235/k2stui/internal/audit"
+	"github.com/fardani235/k8s-copilot/internal/audit"
 )
 
 func exec(t *testing.T, env map[string]string, args ...string) (code int, stdout, stderr string) {
@@ -20,10 +20,10 @@ func exec(t *testing.T, env map[string]string, args ...string) (code int, stdout
 	if env == nil {
 		env = map[string]string{}
 	}
-	if _, ok := env["K2STUI_CONFIG"]; !ok {
+	if _, ok := env["K8S_COPILOT_CONFIG"]; !ok {
 		p := filepath.Join(t.TempDir(), "empty.yaml")
 		os.WriteFile(p, []byte("{}\n"), 0o600)
-		env["K2STUI_CONFIG"] = p
+		env["K8S_COPILOT_CONFIG"] = p
 	}
 	code = run(args, func(k string) string { return env[k] }, &out, &errb)
 	return code, out.String(), errb.String()
@@ -132,7 +132,7 @@ func TestAuditCommands(t *testing.T) {
 
 func TestVersionAndConfig(t *testing.T) {
 	code, out, _ := exec(t, nil, "version")
-	if code != 0 || !strings.HasPrefix(out, "k2stui ") {
+	if code != 0 || !strings.HasPrefix(out, "k8s-copilot ") {
 		t.Fatalf("%d %q", code, out)
 	}
 	code, out, _ = exec(t, map[string]string{"ANTHROPIC_API_KEY": "sk-secret"}, "config", "--model", "m1")

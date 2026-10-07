@@ -19,7 +19,7 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/fardani235/k2stui/internal/audit"
+	"github.com/fardani235/k8s-copilot/internal/audit"
 )
 
 // Action is the human's answer.
@@ -41,7 +41,7 @@ type Decision struct {
 }
 
 // Proposal is everything the human is shown. Every field except ModelReason
-// is computed by k2stui from the cluster and the typed arguments, not written
+// is computed by k8s-copilot from the cluster and the typed arguments, not written
 // by the model.
 type Proposal struct {
 	ID     string

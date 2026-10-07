@@ -1,6 +1,6 @@
 # Decision log
 
-Decisions made while implementing `openspec/changes/add-k2stui`. The design
+Decisions made while implementing `openspec/changes/archive/2026-10-07-add-k2stui`. The design
 document's own decisions (D1–D10 there) stand unless listed under
 [Departures](#departures-from-the-design-document). Numbering here is
 independent (`K-nn`).
@@ -121,14 +121,14 @@ the transcript.
   seq+hash; a log shorter than its head is reported, and so is a log with
   entries but no head. It is replaced on each append; it is not an entry.
 - **The path must still be the open file.** Each append checks that
-  `audit.jsonl` on disk is the file k2stui holds open; if it was deleted or
+  `audit.jsonl` on disk is the file k8s-copilot holds open; if it was deleted or
   rotated away the trail is marked broken (and proposals stop) instead of
   writing into an unlinked file.
 - **File lock on append** so concurrent instances keep a single chain.
 - **Extra outcomes** beyond the spec's four: `applying` (above), `superseded`
   (edited) and `cancelled` (request ended while waiting) — so that every proposal a human
   ever saw has an entry.
-- Location `$XDG_STATE_HOME/k2stui/audit.jsonl`, directory 0700, file 0600.
+- Location `$XDG_STATE_HOME/k8s-copilot/audit.jsonl`, directory 0700, file 0600.
 
 ### K-12 — Secrets are redacted for the model, not in the browser
 Tool results replace Secret values with a marker. The browser shows the object
@@ -167,7 +167,7 @@ half-obeyed). Mutate tools require a `reason`, shown to the human as the
 model's words.
 
 ### K-18 — Configuration
-defaults < file < `K2STUI_*` < flags. Nothing is required beyond an API key in
+defaults < file < `K8S_COPILOT_*` < flags. Nothing is required beyond an API key in
 the provider's usual variable. Unknown keys in the file are errors.
 
 ### K-19 — No streaming in v1
@@ -190,7 +190,7 @@ The log view tails 500 lines and keeps the newest 5000 in memory. The agent's
 than cost per question here. Change with `--model`.
 
 ### K-23 — Module path
-`github.com/fardani235/k2stui`, from the repository's git user. Change in
+`github.com/fardani235/k8s-copilot`, from the repository's git user. Change in
 `go.mod` if the repository will live elsewhere.
 
 ### K-24 — Independent review before hand-over

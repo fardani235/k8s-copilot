@@ -15,10 +15,10 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/validation"
 
-	"github.com/fardani235/k2stui/internal/approval"
-	"github.com/fardani235/k2stui/internal/audit"
-	"github.com/fardani235/k2stui/internal/kube"
-	"github.com/fardani235/k2stui/internal/textutil"
+	"github.com/fardani235/k8s-copilot/internal/approval"
+	"github.com/fardani235/k8s-copilot/internal/audit"
+	"github.com/fardani235/k8s-copilot/internal/kube"
+	"github.com/fardani235/k8s-copilot/internal/textutil"
 )
 
 // RestartAnnotation is the pod-template annotation `kubectl rollout restart`
@@ -250,7 +250,7 @@ func (r *Registry) workload(ctx context.Context, toolName, typ, ns, name string,
 func (r *Registry) guardNamespace(ns string) error {
 	for _, p := range r.opts.ProtectedNamespaces {
 		if p == ns && ns != "" {
-			return fmt.Errorf("refused: namespace %q is protected by configuration; k2stui proposes no changes there", ns)
+			return fmt.Errorf("refused: namespace %q is protected by configuration; k8s-copilot proposes no changes there", ns)
 		}
 	}
 	return nil
@@ -288,7 +288,7 @@ func (r *Registry) planScale(ctx context.Context, raw json.RawMessage) (*Plan, e
 		return nil, &ArgError{Tool: tn, Msg: `"replicas" cannot be negative`}
 	}
 	if want > int64(r.opts.MaxReplicas) {
-		return nil, fmt.Errorf("refused: %d replicas is above the configured maximum of %d that k2stui will propose; nothing was proposed", want, r.opts.MaxReplicas)
+		return nil, fmt.Errorf("refused: %d replicas is above the configured maximum of %d that k8s-copilot will propose; nothing was proposed", want, r.opts.MaxReplicas)
 	}
 	t, o, err := r.workload(ctx, tn, a.Type, a.Namespace, a.Name, "deployments", "statefulsets", "replicasets")
 	if err != nil {

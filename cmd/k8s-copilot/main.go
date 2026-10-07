@@ -1,4 +1,4 @@
-// Command k2stui is a terminal Kubernetes browser with an AI copilot that
+// Command k8s-copilot is a terminal Kubernetes browser with an AI copilot that
 // investigates freely and changes nothing without explicit approval.
 package main
 
@@ -17,14 +17,14 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
 
-	"github.com/fardani235/k2stui/internal/agent"
-	"github.com/fardani235/k2stui/internal/approval"
-	"github.com/fardani235/k2stui/internal/audit"
-	"github.com/fardani235/k2stui/internal/config"
-	"github.com/fardani235/k2stui/internal/kube"
-	"github.com/fardani235/k2stui/internal/llm"
-	"github.com/fardani235/k2stui/internal/tools"
-	"github.com/fardani235/k2stui/internal/tui"
+	"github.com/fardani235/k8s-copilot/internal/agent"
+	"github.com/fardani235/k8s-copilot/internal/approval"
+	"github.com/fardani235/k8s-copilot/internal/audit"
+	"github.com/fardani235/k8s-copilot/internal/config"
+	"github.com/fardani235/k8s-copilot/internal/kube"
+	"github.com/fardani235/k8s-copilot/internal/llm"
+	"github.com/fardani235/k8s-copilot/internal/tools"
+	"github.com/fardani235/k8s-copilot/internal/tui"
 )
 
 // version is set at build time: -ldflags "-X main.version=…".
@@ -40,14 +40,14 @@ func run(args []string, getenv func(string) string, stdout, stderr io.Writer) in
 		return 0
 	}
 	if err != nil {
-		fmt.Fprintln(stderr, "k2stui:", err)
+		fmt.Fprintln(stderr, "k8s-copilot:", err)
 		return 2
 	}
 	cfg := inv.Config
 
 	switch inv.Command {
 	case "version":
-		fmt.Fprintln(stdout, "k2stui", version)
+		fmt.Fprintln(stdout, "k8s-copilot", version)
 		return 0
 	case "config":
 		fmt.Fprint(stdout, cfg.Describe(getenv))
@@ -62,10 +62,10 @@ func run(args []string, getenv func(string) string, stdout, stderr io.Writer) in
 	rest.SetDefaultWarningHandler(rest.NoWarnings{})
 
 	cluster, err := kube.Connect(context.Background(), kube.ConnectOptions{
-		Kubeconfig: cfg.Kubeconfig, Context: cfg.Context, UserAgent: "k2stui/" + version,
+		Kubeconfig: cfg.Kubeconfig, Context: cfg.Context, UserAgent: "k8s-copilot/" + version,
 	})
 	if err != nil {
-		fmt.Fprintln(stderr, "k2stui:", err)
+		fmt.Fprintln(stderr, "k8s-copilot:", err)
 		return 1
 	}
 
@@ -81,7 +81,7 @@ func run(args []string, getenv func(string) string, stdout, stderr io.Writer) in
 	case err != nil:
 		deps.AuditNote = fmt.Sprintf("%v. The copilot can still investigate, but it will not propose any change until the audit trail works.", err)
 	case !trail.Initial().OK():
-		deps.AuditNote = fmt.Sprintf("The existing audit trail at %s fails its integrity check (%d problem(s)): entries were changed or removed outside k2stui. Run `k2stui audit verify` for details. New entries are still appended.",
+		deps.AuditNote = fmt.Sprintf("The existing audit trail at %s fails its integrity check (%d problem(s)): entries were changed or removed outside k8s-copilot. Run `k8s-copilot audit verify` for details. New entries are still appended.",
 			cfg.AuditFile, len(trail.Initial().Problems))
 	}
 	if trail != nil {
@@ -118,9 +118,9 @@ func run(args []string, getenv func(string) string, stdout, stderr io.Writer) in
 	// Let a proposal that was still waiting be recorded as cancelled.
 	model.Shutdown()
 	if err != nil {
-		fmt.Fprintln(stderr, "k2stui:", err)
+		fmt.Fprintln(stderr, "k8s-copilot:", err)
 		if strings.Contains(err.Error(), "TTY") {
-			fmt.Fprintln(stderr, "k2stui is an interactive program and needs a terminal. (`k2stui audit show`, `audit verify` and `config` work without one.)")
+			fmt.Fprintln(stderr, "k8s-copilot is an interactive program and needs a terminal. (`k8s-copilot audit show`, `audit verify` and `config` work without one.)")
 		}
 		return 1
 	}
@@ -130,7 +130,7 @@ func run(args []string, getenv func(string) string, stdout, stderr io.Writer) in
 func auditCommand(cmd, path string, stdout, stderr io.Writer) int {
 	rep, err := audit.Verify(path)
 	if err != nil {
-		fmt.Fprintln(stderr, "k2stui:", err)
+		fmt.Fprintln(stderr, "k8s-copilot:", err)
 		return 1
 	}
 	if cmd == "audit-show" {

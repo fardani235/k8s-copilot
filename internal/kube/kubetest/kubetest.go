@@ -25,7 +25,7 @@ import (
 	kubefake "k8s.io/client-go/kubernetes/fake"
 	clienttesting "k8s.io/client-go/testing"
 
-	"github.com/fardani235/k2stui/internal/kube"
+	"github.com/fardani235/k8s-copilot/internal/kube"
 )
 
 // Write is one patch request the fake received.

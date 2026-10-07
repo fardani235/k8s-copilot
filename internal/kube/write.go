@@ -8,8 +8,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
-// FieldManager identifies k2stui's writes in managedFields.
-const FieldManager = "k2stui"
+// FieldManager identifies k8s-copilot's writes in managedFields.
+const FieldManager = "k8s-copilot"
 
 // MergePatch is THE write path: the only place in the whole program that
 // sends a mutating request to the cluster. It can only JSON-merge-patch an

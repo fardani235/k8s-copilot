@@ -31,7 +31,7 @@ make live     # opt-in: read-only + dry-run against your CURRENT kube context
 
 | Task | Verified by |
 |---|---|
-| 1.1 skeleton | `go build ./...`; `cmd/k2stui` tests. Terminal restore: by hand (below) |
+| 1.1 skeleton | `go build ./...`; `cmd/k8s-copilot` tests. Terminal restore: by hand (below) |
 | 1.2 kubeconfig resolution | `kube.TestLoadConfigResolution` (KUBECONFIG precedence, default path, override, unknown context) |
 | 1.3 connection errors | `kube.TestLoadConfigMissing`, `kube.TestConnectFailures`, `main.TestStartupFailuresExitNonZero` (messages + exit code) |
 | 2.1 discovery | `kube.TestTypesDiscovery`, `TestResolve`, `TestTypesDiscoveryFailure`, `tui.TestTypePicker`, `TestDiscoveryFailureIsShown` |
@@ -78,7 +78,7 @@ tests; each one that was fixed now has a regression test:
 
 ## Against a real API server
 
-`make live` (`K2STUI_LIVE=1 go test ./internal/tools -run Live -v`) uses your
+`make live` (`K8S_COPILOT_LIVE=1 go test ./internal/tools -run Live -v`) uses your
 current context. It only reads and sends `dryRun=All` requests, and asserts
 afterwards that its target is unchanged. It was run against a local minikube
 (Kubernetes v1.35.1) on 2026-10-06:
@@ -88,17 +88,17 @@ afterwards that its target is unchanged. It was run against a local minikube
   and nodes without a namespace scope;
 - `describe_resource` on `kube-system/coredns`;
 - the API server **accepted, in dry-run, all four patch shapes** exactly as
-  k2stui sends them — including the merge patch on the `scale` subresource —
+  k8s-copilot sends them — including the merge patch on the `scale` subresource —
   and the Deployment was verified unchanged afterwards.
 
-`K2STUI_LIVE_DEPLOYMENT=namespace/name` points it at another Deployment.
+`K8S_COPILOT_LIVE_DEPLOYMENT=namespace/name` points it at another Deployment.
 
 ## Still to do by hand
 
 These could not be done while building: they need a person at a real terminal,
 a model API key being spent, and a change being approved on a cluster.
 
-1. **Interactive smoke** (tasks 1.1, 2.6): start `bin/k2stui`, move around
+1. **Interactive smoke** (tasks 1.1, 2.6): start `bin/k8s-copilot`, move around
    (`n`, `t`, `enter`, `l`, `e`, `/`, `c`, `tab`), resize the window very
    small and back, quit with `q` and with `ctrl+c` from a few views, and
    confirm the terminal is left clean each time.
@@ -109,7 +109,7 @@ a model API key being spent, and a change being approved on a cluster.
 4. **Approve one `scale`** (8.3) on something harmless: ask it to scale a
    test Deployment, read the dialog, press `x` to see the request, `ctrl+y`
    `enter`. Then `kubectl get deploy` to confirm the effect and
-   `k2stui audit show` / `k2stui audit verify` to confirm the record.
+   `k8s-copilot audit show` / `k8s-copilot audit verify` to confirm the record.
 5. **Reject one and let one wait**: confirm nothing changes, and that `esc`
    leaves it waiting (`APPROVAL WAITING` in the header) for as long as you like.
 6. **Out-of-scope requests** (8.4): ask it to delete a pod, to change an
@@ -119,8 +119,8 @@ a model API key being spent, and a change being approved on a cluster.
 A throwaway target for 4–6:
 
 ```sh
-kubectl create namespace k2stui-smoke
-kubectl -n k2stui-smoke create deployment web --image=nginx --replicas=1
+kubectl create namespace k8s-copilot-smoke
+kubectl -n k8s-copilot-smoke create deployment web --image=nginx --replicas=1
 # … try things …
-kubectl delete namespace k2stui-smoke
+kubectl delete namespace k8s-copilot-smoke
 ```

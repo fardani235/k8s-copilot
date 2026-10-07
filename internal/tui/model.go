@@ -19,10 +19,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
-	"github.com/fardani235/k2stui/internal/agent"
-	"github.com/fardani235/k2stui/internal/approval"
-	"github.com/fardani235/k2stui/internal/kube"
-	"github.com/fardani235/k2stui/internal/textutil"
+	"github.com/fardani235/k8s-copilot/internal/agent"
+	"github.com/fardani235/k8s-copilot/internal/approval"
+	"github.com/fardani235/k8s-copilot/internal/kube"
+	"github.com/fardani235/k8s-copilot/internal/textutil"
 )
 
 // Minimum usable terminal size.
@@ -635,7 +635,7 @@ func (m *Model) View() string {
 		return "starting…"
 	}
 	if m.width < MinWidth || m.height < MinHeight {
-		return fmt.Sprintf("Terminal too small for k2stui.\nIt needs at least %d×%d; this one is %d×%d.\nEnlarge the window, or press q to quit.",
+		return fmt.Sprintf("Terminal too small for k8s-copilot.\nIt needs at least %d×%d; this one is %d×%d.\nEnlarge the window, or press q to quit.",
 			MinWidth, MinHeight, m.width, m.height)
 	}
 	if m.pending != nil && !m.modal.hidden {
@@ -681,7 +681,7 @@ func joinH(a, b string) string {
 
 func (m *Model) viewHeader() string {
 	info := m.deps.Cluster.Info
-	left := stHeader.Render("k2stui") + stDim.Render("  ctx ") + info.Context + stDim.Render("  ns ") + m.nsLabel()
+	left := stHeader.Render("k8s-copilot") + stDim.Render("  ctx ") + info.Context + stDim.Render("  ns ") + m.nsLabel()
 	if !m.curType.IsZero() {
 		left += stDim.Render("  type ") + m.curType.String()
 	}

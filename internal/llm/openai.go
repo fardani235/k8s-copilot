@@ -112,7 +112,7 @@ func (o *openAI) SendTurn(ctx context.Context, req Request) (Response, error) {
 		headers["Authorization"] = "Bearer " + o.cfg.APIKey
 	}
 	if o.cfg.Provider == "openrouter" {
-		headers["X-Title"] = "k2stui"
+		headers["X-Title"] = "k8s-copilot"
 	}
 
 	var out oaiResponse

@@ -8,7 +8,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// lockFile takes an exclusive advisory lock so two k2stui processes sharing
+// lockFile takes an exclusive advisory lock so two k8s-copilot processes sharing
 // one audit file cannot interleave entries or fork the chain.
 func lockFile(f *os.File) (unlock func(), err error) {
 	if err := unix.Flock(int(f.Fd()), unix.LOCK_EX); err != nil {

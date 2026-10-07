@@ -1,12 +1,12 @@
 # Changelog
 
-## Unreleased — first implementation (`openspec/changes/add-k2stui`)
+## Unreleased — first implementation (`openspec/changes/archive/2026-10-07-add-k2stui`)
 
 Greenfield: the repository previously held only the OpenSpec documents.
 
 ### Added
 
-- **Go module** `github.com/fardani235/k2stui`, single binary `cmd/k2stui`
+- **Go module** `github.com/fardani235/k8s-copilot`, single binary `cmd/k8s-copilot`
   (Bubble Tea / Lip Gloss / Bubbles, client-go).
 - **Resource browser** (`internal/kube`, `internal/tui`): connects via the
   standard kubeconfig rules (`--context`, `--kubeconfig`, `-n` overrides);
@@ -32,12 +32,12 @@ Greenfield: the repository previously held only the OpenSpec documents.
   (re-validated) / hide. Blocks
   indefinitely; no timeout or default.
 - **Audit trail** (`internal/audit`): append-only hash-chained JSONL at
-  `~/.local/state/k2stui/audit.jsonl`; `k2stui audit show`, `k2stui audit
+  `~/.local/state/k8s-copilot/audit.jsonl`; `k8s-copilot audit show`, `k8s-copilot audit
   verify`, and an in-app view (`A`). An approval is recorded before the
   change is sent and its result after. Fail-closed: no working trail, no
   proposals.
-- **Configuration** (`internal/config`): defaults < file < `K2STUI_*` < flags;
-  `k2stui config` prints the effective settings.
+- **Configuration** (`internal/config`): defaults < file < `K8S_COPILOT_*` < flags;
+  `k8s-copilot config` prints the effective settings.
 - **Safety hardening not in the original spec**: approval grants bound to the
   exact request; stale-state check before apply; Secret redaction for the
   model; terminal-escape sanitisation of all cluster/model text; replica cap;

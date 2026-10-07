@@ -1,8 +1,8 @@
-// Package config resolves k2stui's settings.
+// Package config resolves k8s-copilot's settings.
 //
 // Precedence, lowest to highest: built-in defaults, the config file,
-// K2STUI_* environment variables, command-line flags. Nothing is required:
-// with no file, no variables and no flags, k2stui connects to the current
+// K8S_COPILOT_* environment variables, command-line flags. Nothing is required:
+// with no file, no variables and no flags, k8s-copilot connects to the current
 // kubeconfig context and uses Anthropic with ANTHROPIC_API_KEY.
 //
 // API keys are never configuration. The config can only name the environment
@@ -22,8 +22,8 @@ import (
 
 	"sigs.k8s.io/yaml"
 
-	"github.com/fardani235/k2stui/internal/audit"
-	"github.com/fardani235/k2stui/internal/llm"
+	"github.com/fardani235/k8s-copilot/internal/audit"
+	"github.com/fardani235/k8s-copilot/internal/llm"
 )
 
 // Config is the effective configuration.
@@ -96,13 +96,13 @@ type file struct {
 	RefreshInterval     *string   `json:"refresh_interval"`
 }
 
-// DefaultFile is $XDG_CONFIG_HOME/k2stui/config.yaml (~/.config/… by default).
+// DefaultFile is $XDG_CONFIG_HOME/k8s-copilot/config.yaml (~/.config/… by default).
 func DefaultFile() string {
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(dir, "k2stui", "config.yaml")
+	return filepath.Join(dir, "k8s-copilot", "config.yaml")
 }
 
 func (c *Config) applyFile(path string, mustExist bool) error {
@@ -189,24 +189,24 @@ func (c *Config) applyEnv(getenv func(string) string) error {
 		*dst = n
 		return nil
 	}
-	str("K2STUI_KUBECONFIG", &c.Kubeconfig)
-	str("K2STUI_CONTEXT", &c.Context)
-	str("K2STUI_NAMESPACE", &c.Namespace)
-	str("K2STUI_PROVIDER", &c.Provider)
-	str("K2STUI_MODEL", &c.Model)
-	str("K2STUI_BASE_URL", &c.BaseURL)
-	str("K2STUI_API_KEY_ENV", &c.APIKeyEnv)
-	str("K2STUI_AUDIT_FILE", &c.AuditFile)
-	if err := num("K2STUI_MAX_ITERATIONS", &c.MaxIterations); err != nil {
+	str("K8S_COPILOT_KUBECONFIG", &c.Kubeconfig)
+	str("K8S_COPILOT_CONTEXT", &c.Context)
+	str("K8S_COPILOT_NAMESPACE", &c.Namespace)
+	str("K8S_COPILOT_PROVIDER", &c.Provider)
+	str("K8S_COPILOT_MODEL", &c.Model)
+	str("K8S_COPILOT_BASE_URL", &c.BaseURL)
+	str("K8S_COPILOT_API_KEY_ENV", &c.APIKeyEnv)
+	str("K8S_COPILOT_AUDIT_FILE", &c.AuditFile)
+	if err := num("K8S_COPILOT_MAX_ITERATIONS", &c.MaxIterations); err != nil {
 		return err
 	}
-	if err := num("K2STUI_MAX_TOOL_CALLS", &c.MaxToolCalls); err != nil {
+	if err := num("K8S_COPILOT_MAX_TOOL_CALLS", &c.MaxToolCalls); err != nil {
 		return err
 	}
-	if v := getenv("K2STUI_REFRESH_INTERVAL"); v != "" {
+	if v := getenv("K8S_COPILOT_REFRESH_INTERVAL"); v != "" {
 		d, err := parseRefresh(v)
 		if err != nil {
-			return fmt.Errorf("K2STUI_REFRESH_INTERVAL: %v", err)
+			return fmt.Errorf("K8S_COPILOT_REFRESH_INTERVAL: %v", err)
 		}
 		c.RefreshInterval = d
 	}
@@ -270,14 +270,14 @@ type Invocation struct {
 // ErrHelp is returned when usage was requested; the text has been written.
 var ErrHelp = flag.ErrHelp
 
-const usage = `k2stui — a Kubernetes terminal browser with an AI copilot that asks before it acts.
+const usage = `k8s-copilot — a Kubernetes terminal browser with an AI copilot that asks before it acts.
 
 Usage:
-  k2stui [flags]                 start the browser and copilot
-  k2stui audit verify [flags]    check the audit trail's integrity
-  k2stui audit show [flags]      print the audit trail
-  k2stui config [flags]          print the effective configuration
-  k2stui version
+  k8s-copilot [flags]                 start the browser and copilot
+  k8s-copilot audit verify [flags]    check the audit trail's integrity
+  k8s-copilot audit show [flags]      print the audit trail
+  k8s-copilot config [flags]          print the effective configuration
+  k8s-copilot version
 
 Flags:
 `
@@ -290,17 +290,17 @@ func Parse(args []string, getenv func(string) string, stderr io.Writer) (Invocat
 	case len(args) >= 2 && args[0] == "audit" && (args[1] == "verify" || args[1] == "show"):
 		inv.Command, args = "audit-"+args[1], args[2:]
 	case len(args) >= 1 && args[0] == "audit":
-		return inv, errors.New("usage: k2stui audit verify | k2stui audit show")
+		return inv, errors.New("usage: k8s-copilot audit verify | k8s-copilot audit show")
 	case len(args) >= 1 && (args[0] == "config" || args[0] == "version"):
 		inv.Command, args = args[0], args[1:]
 	}
 
-	fs := flag.NewFlagSet("k2stui", flag.ContinueOnError)
+	fs := flag.NewFlagSet("k8s-copilot", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
 		fmt.Fprint(stderr, usage)
 		fs.PrintDefaults()
-		fmt.Fprintf(stderr, "\nConfig file: %s (optional). Environment: K2STUI_PROVIDER, K2STUI_MODEL, K2STUI_BASE_URL,\nK2STUI_API_KEY_ENV, K2STUI_CONTEXT, K2STUI_NAMESPACE, K2STUI_AUDIT_FILE, K2STUI_REFRESH_INTERVAL,\nK2STUI_MAX_ITERATIONS, K2STUI_MAX_TOOL_CALLS. See docs/configuration.md.\n", DefaultFile())
+		fmt.Fprintf(stderr, "\nConfig file: %s (optional). Environment: K8S_COPILOT_PROVIDER, K8S_COPILOT_MODEL, K8S_COPILOT_BASE_URL,\nK8S_COPILOT_API_KEY_ENV, K8S_COPILOT_CONTEXT, K8S_COPILOT_NAMESPACE, K8S_COPILOT_AUDIT_FILE, K8S_COPILOT_REFRESH_INTERVAL,\nK8S_COPILOT_MAX_ITERATIONS, K8S_COPILOT_MAX_TOOL_CALLS. See docs/configuration.md.\n", DefaultFile())
 	}
 	var (
 		cfgFile    = fs.String("config", "", "config file (default: "+DefaultFile()+")")
@@ -322,7 +322,7 @@ func Parse(args []string, getenv func(string) string, stderr io.Writer) (Invocat
 		return inv, err
 	}
 	if fs.NArg() > 0 {
-		return inv, fmt.Errorf("unexpected argument %q (see k2stui --help)", fs.Arg(0))
+		return inv, fmt.Errorf("unexpected argument %q (see k8s-copilot --help)", fs.Arg(0))
 	}
 	if *version {
 		inv.Command = "version"
@@ -331,7 +331,7 @@ func Parse(args []string, getenv func(string) string, stderr io.Writer) (Invocat
 	cfg := Default()
 	path, explicit := *cfgFile, *cfgFile != ""
 	if !explicit {
-		if v := getenv("K2STUI_CONFIG"); v != "" {
+		if v := getenv("K8S_COPILOT_CONFIG"); v != "" {
 			path, explicit = v, true
 		} else {
 			path = DefaultFile()

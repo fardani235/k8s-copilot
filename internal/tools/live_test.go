@@ -7,31 +7,31 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fardani235/k2stui/internal/kube"
-	"github.com/fardani235/k2stui/internal/tools"
+	"github.com/fardani235/k8s-copilot/internal/kube"
+	"github.com/fardani235/k8s-copilot/internal/tools"
 )
 
 // TestLiveClusterReadOnly checks the things fakes cannot: that a real API
 // server prints Tables for us, and that it accepts the exact patch shapes the
 // mutate tools send — using dry-run only.
 //
-// It is opt-in (K2STUI_LIVE=1) and uses the current kubeconfig context. It
+// It is opt-in (K8S_COPILOT_LIVE=1) and uses the current kubeconfig context. It
 // reads, and sends dryRun=All requests, which the server validates and does
 // not persist. It never applies anything; it asserts afterwards that nothing
 // changed.
 //
-//	K2STUI_LIVE=1 go test ./internal/tools -run Live -v
+//	K8S_COPILOT_LIVE=1 go test ./internal/tools -run Live -v
 //
-// K2STUI_LIVE_DEPLOYMENT=namespace/name picks the Deployment to dry-run
+// K8S_COPILOT_LIVE_DEPLOYMENT=namespace/name picks the Deployment to dry-run
 // against (default kube-system/coredns).
 func TestLiveClusterReadOnly(t *testing.T) {
-	if os.Getenv("K2STUI_LIVE") != "1" {
-		t.Skip("set K2STUI_LIVE=1 to run against the current kubeconfig context (read-only + dry-run)")
+	if os.Getenv("K8S_COPILOT_LIVE") != "1" {
+		t.Skip("set K8S_COPILOT_LIVE=1 to run against the current kubeconfig context (read-only + dry-run)")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	c, err := kube.Connect(ctx, kube.ConnectOptions{UserAgent: "k2stui-live-test"})
+	c, err := kube.Connect(ctx, kube.ConnectOptions{UserAgent: "k8s-copilot-live-test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,10 +53,10 @@ func TestLiveClusterReadOnly(t *testing.T) {
 	t.Logf("%d listable resource types (%d from non-core API groups)", len(types), crds)
 
 	nsName, depName := "kube-system", "coredns"
-	if v := os.Getenv("K2STUI_LIVE_DEPLOYMENT"); v != "" {
+	if v := os.Getenv("K8S_COPILOT_LIVE_DEPLOYMENT"); v != "" {
 		var ok bool
 		if nsName, depName, ok = strings.Cut(v, "/"); !ok {
-			t.Fatal("K2STUI_LIVE_DEPLOYMENT must be namespace/name")
+			t.Fatal("K8S_COPILOT_LIVE_DEPLOYMENT must be namespace/name")
 		}
 	}
 
@@ -100,8 +100,8 @@ func TestLiveClusterReadOnly(t *testing.T) {
 	}{
 		{"scale", M{"type": "deployment", "namespace": nsName, "name": depName, "replicas": replicas + 1, "reason": "live dry-run test"}},
 		{"rollout_restart", M{"type": "deployment", "namespace": nsName, "name": depName, "reason": "live dry-run test"}},
-		{"set_labels", M{"type": "deployment", "namespace": nsName, "name": depName, "set": M{"k2stui-live-test": "x"}, "reason": "live dry-run test"}},
-		{"set_annotations", M{"type": "deployment", "namespace": nsName, "name": depName, "set": M{"k2stui.dev/live-test": "x"}, "reason": "live dry-run test"}},
+		{"set_labels", M{"type": "deployment", "namespace": nsName, "name": depName, "set": M{"k8s-copilot-live-test": "x"}, "reason": "live dry-run test"}},
+		{"set_annotations", M{"type": "deployment", "namespace": nsName, "name": depName, "set": M{"k8s-copilot.dev/live-test": "x"}, "reason": "live dry-run test"}},
 	} {
 		p, err := r.Plan(ctx, tc.tool, args(tc.args))
 		if err != nil {
@@ -120,7 +120,7 @@ func TestLiveClusterReadOnly(t *testing.T) {
 	if before.GetResourceVersion() != after.GetResourceVersion() {
 		// Controllers update status all the time, so compare what we touch.
 		a, _, _ := nestedInt(after.Object, "spec", "replicas")
-		if a != replicas || after.GetLabels()["k2stui-live-test"] != "" || after.GetAnnotations()["k2stui.dev/live-test"] != "" || after.GetGeneration() != before.GetGeneration() {
+		if a != replicas || after.GetLabels()["k8s-copilot-live-test"] != "" || after.GetAnnotations()["k8s-copilot.dev/live-test"] != "" || after.GetGeneration() != before.GetGeneration() {
 			t.Fatalf("the dry-runs changed the deployment")
 		}
 	}

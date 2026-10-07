@@ -16,13 +16,13 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	clienttesting "k8s.io/client-go/testing"
 
-	"github.com/fardani235/k2stui/internal/agent"
-	"github.com/fardani235/k2stui/internal/approval"
-	"github.com/fardani235/k2stui/internal/audit"
-	"github.com/fardani235/k2stui/internal/kube"
-	"github.com/fardani235/k2stui/internal/kube/kubetest"
-	"github.com/fardani235/k2stui/internal/llm"
-	"github.com/fardani235/k2stui/internal/tools"
+	"github.com/fardani235/k8s-copilot/internal/agent"
+	"github.com/fardani235/k8s-copilot/internal/approval"
+	"github.com/fardani235/k8s-copilot/internal/audit"
+	"github.com/fardani235/k8s-copilot/internal/kube"
+	"github.com/fardani235/k8s-copilot/internal/kube/kubetest"
+	"github.com/fardani235/k8s-copilot/internal/llm"
+	"github.com/fardani235/k8s-copilot/internal/tools"
 )
 
 // ui drives a Model the way the Bubble Tea runtime would, but synchronously:

@@ -1,4 +1,4 @@
-# k2stui
+# k8s-copilot
 
 A terminal Kubernetes browser with an AI copilot beside it.
 
@@ -13,7 +13,7 @@ you like. No timeout, no default. Nothing happens until you say yes, and if you
 say no it moves on.
 
 ```
- k2stui  ctx minikube  ns shop  type pods                           APPROVAL WAITING — ctrl+p
+ k8s-copilot  ctx minikube  ns shop  type pods                      APPROVAL WAITING — ctrl+p
 ╭──────────────────────────────────────────────────────╮╭──────────────────────────────────╮
 │pods · namespace shop · 3                             ││copilot · anthropic/claude-opus-… │
 │NAME    READY  STATUS            RESTARTS      AGE    ││you                               │
@@ -32,9 +32,9 @@ say no it moves on.
 Requires Go 1.26+ to build. No cluster-side install, no new credentials.
 
 ```sh
-make build                     # → bin/k2stui
+make build                     # → bin/k8s-copilot
 export ANTHROPIC_API_KEY=…     # or pick another provider, see below
-bin/k2stui                     # uses your current kubeconfig context
+bin/k8s-copilot                     # uses your current kubeconfig context
 ```
 
 It connects exactly the way `kubectl` does: `$KUBECONFIG`, else
@@ -51,15 +51,15 @@ set.
 | `anthropic` (default)| `ANTHROPIC_API_KEY`  | default model `claude-opus-5-5`; `--model` changes it |
 | `openai`             | `OPENAI_API_KEY`     | `--model` required                                 |
 | `openrouter`         | `OPENROUTER_API_KEY` | `--model` required, e.g. any model OpenRouter lists |
-| `openai-compatible`  | `K2STUI_API_KEY` (optional) | `--base-url` + `--model`; Ollama, vLLM, LiteLLM, a gateway… |
+| `openai-compatible`  | `K8S_COPILOT_API_KEY` (optional) | `--base-url` + `--model`; Ollama, vLLM, LiteLLM, a gateway… |
 
 ```sh
-bin/k2stui --provider openrouter --model <vendor/model>
-bin/k2stui --provider openai-compatible --base-url http://localhost:11434/v1 --model llama3.1
+bin/k8s-copilot --provider openrouter --model <vendor/model>
+bin/k8s-copilot --provider openai-compatible --base-url http://localhost:11434/v1 --model llama3.1
 ```
 
-The same settings can live in `~/.config/k2stui/config.yaml` or `K2STUI_*`
-variables — see [docs/configuration.md](docs/configuration.md). `k2stui config`
+The same settings can live in `~/.config/k8s-copilot/config.yaml` or `K8S_COPILOT_*`
+variables — see [docs/configuration.md](docs/configuration.md). `k8s-copilot config`
 prints what is in effect (never the key).
 
 ## Using it
@@ -115,7 +115,7 @@ selected resource) with every question, so "this pod" just works.
 - `esc` only hides the dialog — the proposal keeps waiting and `ctrl+p` brings
   it back. You can browse meanwhile.
 
-Everything in that dialog except "Its reason" is computed by k2stui from the
+Everything in that dialog except "Its reason" is computed by k8s-copilot from the
 cluster, not written by the model.
 
 ## What it can and cannot do
@@ -138,13 +138,13 @@ to disk *before* the change is sent and the result right after, so there is no
 moment in which a change exists without a record.
 
 ```sh
-k2stui audit show      # read it
-k2stui audit verify    # check nobody altered it (exit 1 if they did)
+k8s-copilot audit show      # read it
+k8s-copilot audit verify    # check nobody altered it (exit 1 if they did)
 ```
 
-It lives at `~/.local/state/k2stui/audit.jsonl` (JSON Lines, hash-chained,
+It lives at `~/.local/state/k8s-copilot/audit.jsonl` (JSON Lines, hash-chained,
 append-only, mode 0600) and is also a keypress away inside the app (`A`). If
-the trail cannot be written, k2stui stops proposing changes: no record, no
+the trail cannot be written, k8s-copilot stops proposing changes: no record, no
 change.
 
 ## Documentation
@@ -155,7 +155,7 @@ change.
 - [docs/configuration.md](docs/configuration.md) — all settings
 - [docs/testing.md](docs/testing.md) — what is tested, how, and what still needs a human
 - [CHANGELOG.md](CHANGELOG.md)
-- [openspec/changes/add-k2stui/](openspec/changes/add-k2stui/) — the requirements this implements
+- [openspec/changes/archive/2026-10-07-add-k2stui/](openspec/changes/archive/2026-10-07-add-k2stui/) — the requirements this implements
 
 ## Status
 
