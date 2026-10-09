@@ -59,7 +59,7 @@ func TestRegistryContents(t *testing.T) {
 	r := registry(kubetest.New())
 	want := map[string]tools.Tier{
 		"list_resources": tools.Read, "get_resource": tools.Read, "describe_resource": tools.Read,
-		"get_logs": tools.Read, "get_events": tools.Read,
+		"get_logs": tools.Read, "get_events": tools.Read, "get_metrics": tools.Read,
 		"scale": tools.Mutate, "rollout_restart": tools.Mutate, "set_labels": tools.Mutate, "set_annotations": tools.Mutate,
 	}
 	specs := r.Specs()

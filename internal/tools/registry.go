@@ -78,7 +78,7 @@ type Registry struct {
 	order []string
 }
 
-// NewRegistry builds the v1 tool set: five read tools, four mutate tools.
+// NewRegistry builds the tool set: six read tools, four mutate tools.
 func NewRegistry(c *kube.Cluster, opts Options) *Registry {
 	if opts.MaxResultBytes <= 0 {
 		opts.MaxResultBytes = DefaultOptions().MaxResultBytes
@@ -88,6 +88,7 @@ func NewRegistry(c *kube.Cluster, opts Options) *Registry {
 	}
 	r := &Registry{c: c, opts: opts, tools: map[string]*tool{}}
 	r.registerRead()
+	r.registerMetrics()
 	r.registerMutate()
 	return r
 }

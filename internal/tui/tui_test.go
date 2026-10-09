@@ -86,7 +86,7 @@ func (u *ui) pump(cmd tea.Cmd) {
 	default:
 		// Only our own messages drive state; ignore library housekeeping.
 		switch msg.(type) {
-		case typesMsg, nsMsg, listMsg, subjectMsg, eventsMsg, auditMsg, logMsg, agentEventMsg, proposalMsg:
+		case typesMsg, nsMsg, listMsg, subjectMsg, eventsMsg, auditMsg, logMsg, agentEventMsg, proposalMsg, metricsMsg:
 			u.send(msg)
 		}
 	}
@@ -430,6 +430,38 @@ func TestCopilotToggleKeepsBrowserState(t *testing.T) {
 	}
 }
 
+// A long "copilot is not available" reason in a short pane is cut to the
+// pane; it does not push the pane's frame off the screen. (Found with a real
+// configuration whose message is longer than the one these tests use.)
+func TestUnavailableCopilotKeepsItsFrame(t *testing.T) {
+	u := newUI(t, fakeCluster(), func(d *Deps) {
+		d.AgentErr = "no API key for provider \"openrouter\": the environment variable OPENROUTER_API_KEY is not set. " +
+			"Set it (export OPENROUTER_API_KEY=…) and restart, or choose another provider with --provider (anthropic, openai, openrouter, openai-compatible)."
+	})
+	for _, size := range [][2]int{{MinWidth, MinHeight}, {72, 18}, {120, 40}} {
+		u.send(tea.WindowSizeMsg{Width: size[0], Height: size[1]})
+		for _, keys := range [][]string{{"c"}, {"m"}} {
+			u.keys(keys...)
+			lines := strings.Split(u.screen(), "\n")
+			if len(lines) != size[1] {
+				t.Fatalf("%dx%d after %v: %d lines\n%s", size[0], size[1], keys, len(lines), u.screen())
+			}
+			panes := 2
+			if u.m.copilotMax {
+				panes = 1
+			}
+			if frame := lines[len(lines)-2]; strings.Count(frame, "╰") != panes || strings.Count(frame, "╯") != panes {
+				t.Fatalf("%dx%d after %v: a pane lost its bottom border\n%s", size[0], size[1], keys, u.screen())
+			}
+			u.want("The copilot is not available")
+			u.keys("esc", "c") // back to the browser alone
+			if u.m.copilotOpen {
+				u.keys("c")
+			}
+		}
+	}
+}
+
 // Maximize: m from the browser gives the copilot the whole body and focuses
 // it; esc and tab restore the split with the browser's state intact.
 func TestCopilotMaximizeAndRestore(t *testing.T) {
@@ -497,7 +529,12 @@ type copilotUI struct {
 
 func newCopilotUI(t *testing.T, steps ...llm.StubStep) *copilotUI {
 	t.Helper()
-	f := fakeCluster()
+	return newCopilotUIOn(t, fakeCluster(), steps...)
+}
+
+// newCopilotUIOn is newCopilotUI over a given cluster.
+func newCopilotUIOn(t *testing.T, f *kubetest.Fake, steps ...llm.StubStep) *copilotUI {
+	t.Helper()
 	stub := llm.NewStub(steps...)
 	gate := approval.NewGate()
 	focus := &FocusStore{}

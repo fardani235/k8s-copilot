@@ -41,6 +41,11 @@ max_result_bytes: 24000   # cap on one tool result sent to the model
 refresh_interval: 5s      # 0 or off disables periodic refresh
 ```
 
+The metrics screen (`M`) has no settings of its own. It follows
+`refresh_interval`, but never re-reads more often than every 10 s — the
+cluster's metrics source has a new sample only every 15 s or so — and with
+`refresh_interval: off` it reads when opened and when you press `r`.
+
 API keys cannot be put in this file: a file containing `api_key` is rejected
 with a message saying so.
 

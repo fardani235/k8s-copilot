@@ -11,9 +11,12 @@ package kubetest
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -52,6 +55,13 @@ type Fake struct {
 	// an error.
 	OnWrite func(Write) error
 	logs    map[string]string
+
+	// The metrics API (metrics.k8s.io). Like a cluster without
+	// metrics-server, the fake does not serve it until ServeMetrics is
+	// called.
+	metricsServed bool
+	metricsErr    error
+	metricsCalls  int
 }
 
 // Discovery is a fake whose preferred resources can be set or made to fail.
@@ -69,6 +79,12 @@ var _ discovery.DiscoveryInterface = (*Discovery)(nil)
 
 // WidgetGVR is a namespaced custom resource served by the fake.
 var WidgetGVR = schema.GroupVersionResource{Group: "example.com", Version: "v1", Resource: "widgets"}
+
+// The resource metrics API, as metrics-server serves it.
+var (
+	NodeMetricsGVR = schema.GroupVersionResource{Group: "metrics.k8s.io", Version: "v1beta1", Resource: "nodes"}
+	PodMetricsGVR  = schema.GroupVersionResource{Group: "metrics.k8s.io", Version: "v1beta1", Resource: "pods"}
+)
 
 // Resources is what the fake cluster "serves".
 func Resources() []*metav1.APIResourceList {
@@ -112,7 +128,9 @@ func New(objects ...runtime.Object) *Fake {
 		}
 	}
 	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
-		map[schema.GroupVersionResource]string{WidgetGVR: "WidgetList"}, objects...)
+		map[schema.GroupVersionResource]string{
+			WidgetGVR: "WidgetList", NodeMetricsGVR: "NodeMetricsList", PodMetricsGVR: "PodMetricsList",
+		}, objects...)
 	cs := kubefake.NewClientset(typed...)
 	disco := &Discovery{FakeDiscovery: cs.Discovery().(*fakediscovery.FakeDiscovery), Lists: Resources()}
 
@@ -148,6 +166,24 @@ func New(objects ...runtime.Object) *Fake {
 		return false, nil, nil // let the tracker apply it
 	})
 
+	dyn.PrependReactor("list", "*", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		gvr := action.GetResource()
+		if gvr.Group != NodeMetricsGVR.Group {
+			return false, nil, nil
+		}
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.metricsCalls++
+		switch {
+		case f.metricsErr != nil:
+			return true, nil, f.metricsErr
+		case !f.metricsServed:
+			// What an API server without the metrics APIService answers.
+			return true, nil, apierrors.NewGenericServerResponse(404, "get", gvr.GroupResource(), "", "", 0, false)
+		}
+		return false, nil, nil // let the tracker answer
+	})
+
 	cs.PrependReactor("get", "pods", func(action clienttesting.Action) (bool, runtime.Object, error) {
 		ga, ok := action.(clienttesting.GenericActionImpl)
 		if !ok || ga.GetSubresource() != "log" {
@@ -178,6 +214,82 @@ func (f *Fake) SetLogs(namespace, container string, previous bool, text string) 
 		key += "/previous"
 	}
 	f.logs[key] = text
+}
+
+// ServeMetrics makes the fake serve the metrics API (with no samples until
+// some are set), like a cluster with a working metrics-server.
+func (f *Fake) ServeMetrics() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.metricsServed, f.metricsErr = true, nil
+}
+
+// FailMetrics makes every metrics API request fail with err — a Forbidden, a
+// ServiceUnavailable, a timeout. nil makes it answer again.
+func (f *Fake) FailMetrics(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.metricsErr = err
+}
+
+// MetricsCalls counts the requests the metrics API received.
+func (f *Fake) MetricsCalls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.metricsCalls
+}
+
+// Usage is one container's reading in the metrics API.
+type Usage struct {
+	Container string
+	CPU       string // a quantity, as metrics-server reports it: "250m", "156340215n"
+	Memory    string // "64Mi", "1362696Ki"
+}
+
+// SetNodeMetrics sets the reading the metrics API reports for a node, sampled
+// just now, and starts serving the API.
+func (f *Fake) SetNodeMetrics(node, cpu, memory string) {
+	f.ServeMetrics()
+	f.putMetrics(NodeMetricsGVR, "", &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "metrics.k8s.io/v1beta1", "kind": "NodeMetrics",
+		"metadata":  map[string]any{"name": node},
+		"timestamp": time.Now().UTC().Format(time.RFC3339), "window": "15s",
+		"usage": map[string]any{"cpu": cpu, "memory": memory},
+	}})
+}
+
+// SetPodMetrics sets the reading the metrics API reports for a pod's
+// containers, sampled just now, and starts serving the API.
+func (f *Fake) SetPodMetrics(namespace, pod string, usage ...Usage) {
+	f.ServeMetrics()
+	containers := make([]any, 0, len(usage))
+	for _, u := range usage {
+		containers = append(containers, map[string]any{
+			"name": u.Container, "usage": map[string]any{"cpu": u.CPU, "memory": u.Memory},
+		})
+	}
+	f.putMetrics(PodMetricsGVR, namespace, &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "metrics.k8s.io/v1beta1", "kind": "PodMetrics",
+		"metadata":  map[string]any{"namespace": namespace, "name": pod},
+		"timestamp": time.Now().UTC().Format(time.RFC3339), "window": "15s",
+		"containers": containers,
+	}})
+}
+
+// putMetrics stores a metrics object under the resource the metrics API
+// serves it as. (The tracker would otherwise guess "podmetricses" from the
+// kind.)
+func (f *Fake) putMetrics(gvr schema.GroupVersionResource, namespace string, o *unstructured.Unstructured) {
+	tr := f.Dynamic.Tracker()
+	if _, err := tr.Get(gvr, namespace, o.GetName()); err == nil {
+		if err := tr.Update(gvr, o, namespace); err != nil {
+			panic(err)
+		}
+		return
+	}
+	if err := tr.Create(gvr, o, namespace); err != nil {
+		panic(err)
+	}
 }
 
 // Writes returns every patch received, dry-runs included.
@@ -260,6 +372,47 @@ func Pod(namespace, name string, containers ...string) *corev1.Pod {
 }
 
 func nameUID(ns, name string) string { return fmt.Sprintf("%s-%s", ns, name) }
+
+// Node builds a Ready node with the given allocatable CPU and memory.
+func Node(name, cpu, memory string) *corev1.Node {
+	alloc := corev1.ResourceList{corev1.ResourceCPU: resource.MustParse(cpu), corev1.ResourceMemory: resource.MustParse(memory)}
+	return &corev1.Node{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Node"},
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Status: corev1.NodeStatus{
+			Capacity: alloc, Allocatable: alloc,
+			Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}},
+		},
+	}
+}
+
+// Container builds a container with requests and limits. An empty quantity
+// leaves that request or limit unset.
+func Container(name, cpuRequest, cpuLimit, memRequest, memLimit string) corev1.Container {
+	c := corev1.Container{Name: name, Image: "example/" + name + ":1"}
+	set := func(dst *corev1.ResourceList, key corev1.ResourceName, q string) {
+		if q == "" {
+			return
+		}
+		if *dst == nil {
+			*dst = corev1.ResourceList{}
+		}
+		(*dst)[key] = resource.MustParse(q)
+	}
+	set(&c.Resources.Requests, corev1.ResourceCPU, cpuRequest)
+	set(&c.Resources.Limits, corev1.ResourceCPU, cpuLimit)
+	set(&c.Resources.Requests, corev1.ResourceMemory, memRequest)
+	set(&c.Resources.Limits, corev1.ResourceMemory, memLimit)
+	return c
+}
+
+// PodOn builds a running pod scheduled on a node, with the given containers.
+func PodOn(namespace, name, node string, containers ...corev1.Container) *corev1.Pod {
+	p := Pod(namespace, name)
+	p.Spec.NodeName = node
+	p.Spec.Containers = containers
+	return p
+}
 
 // Namespace builds a namespace.
 func Namespace(name string) *corev1.Namespace {
