@@ -79,10 +79,11 @@ const (
 	vEvents
 	vAudit
 	vHelp
+	vMetrics
 )
 
 func (v viewID) String() string {
-	return [...]string{"list", "detail", "logs", "events", "audit trail", "help"}[v]
+	return [...]string{"list", "detail", "logs", "events", "audit trail", "help", "metrics"}[v]
 }
 
 type paneID int
@@ -158,6 +159,7 @@ type Model struct {
 	body     viewport.Model // detail / events / audit / help
 	logs     logState
 	auditTxt string
+	metrics  metricsState
 
 	// copilot
 	copilotOpen bool
@@ -397,10 +399,20 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tickMsg:
 		var cmd tea.Cmd
-		if m.view == vList && m.pick == nil && !m.loading && !m.curType.IsZero() {
+		switch {
+		case m.view == vList && m.pick == nil && !m.loading && !m.curType.IsZero():
 			cmd = m.loadList()
+		case m.metricsDue():
+			cmd = m.loadMetrics(false)
 		}
 		return m, tea.Batch(cmd, m.tick())
+
+	case metricsMsg:
+		m.onMetrics(msg)
+		return m, nil
+
+	case metricsClockMsg:
+		return m, m.onMetricsClock(msg)
 
 	case subjectMsg:
 		if msg.seq != m.subjSeq {
@@ -430,7 +442,11 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case agentEventMsg:
 		m.onAgentEvent(msg.ev)
-		return m, m.listenAgent()
+		var adopt tea.Cmd
+		if end, ok := msg.ev.(agent.EventToolEnd); ok && end.Call.Name == "get_metrics" {
+			adopt = m.adoptMetrics()
+		}
+		return m, tea.Batch(adopt, m.listenAgent())
 
 	case proposalMsg:
 		m.openProposal(msg.req)
@@ -527,7 +543,12 @@ func (m *Model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.loadAudit()
 		}
 		return m, nil
+	case "M":
+		return m, m.openMetrics()
 	case "esc", "backspace":
+		if m.view == vMetrics && m.metricsBack(key) {
+			return m, nil // one level up inside the metrics screen
+		}
 		if m.view != vList {
 			return m, m.pop()
 		}
@@ -543,6 +564,8 @@ func (m *Model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.onListKey(key)
 	case vLogs:
 		return m, m.onLogsKey(msg)
+	case vMetrics:
+		return m, m.onMetricsKey(msg)
 	default:
 		return m, m.onBodyKey(msg)
 	}
@@ -579,6 +602,8 @@ func (m *Model) pop() tea.Cmd {
 		m.body.SetContent(wrap(helpText(), m.body.Width))
 	case vLogs:
 		return m.startLogs()
+	case vMetrics:
+		return tea.Batch(m.loadMetrics(false), m.metricsClock())
 	}
 	return nil
 }
@@ -603,6 +628,8 @@ func (m *Model) publishFocus() {
 	if m.view == vDetail || m.view == vLogs || m.view == vEvents {
 		f.Selected, f.SelectedNamespace = m.subj.name, m.subj.namespace
 		f.Type, f.Kind, f.Namespaced = m.subj.typ.String(), m.subj.typ.Kind, m.subj.typ.Namespaced
+	} else if m.view == vMetrics {
+		m.metricsFocus(&f)
 	} else if row, ok := m.selectedRow(); ok {
 		f.Selected, f.SelectedNamespace = row.Name, row.Namespace
 	}
@@ -768,8 +795,10 @@ func (m *Model) viewFooter() string {
 		} else {
 			h = hints("enter", "send", "tab/esc", "browser", "pgup/pgdn", "scroll", "ctrl+l", "new conversation", "ctrl+c", "quit")
 		}
+	case m.view == vMetrics:
+		h = m.metricsHints()
 	case m.view == vList:
-		h = hints("↑↓", "move", "enter", "detail", "l", "logs", "e", "events", "n", "namespace", "t", "type", "/", "filter", "r", "refresh", "c", "copilot", "m", "maximize", "tab", "ask", "?", "help", "q", "quit")
+		h = hints("↑↓", "move", "enter", "detail", "l", "logs", "e", "events", "n", "namespace", "t", "type", "/", "filter", "M", "metrics", "r", "refresh", "c", "copilot", "m", "maximize", "tab", "ask", "?", "help", "q", "quit")
 	case m.view == vLogs:
 		h = hints("f", "follow", "s", "container", "v", "previous", "↑↓", "scroll", "esc", "back", "m", "maximize", "tab", "ask", "q", "quit")
 	case m.view == vDetail:
@@ -789,6 +818,8 @@ func (m *Model) viewBrowser(w, h int) string {
 		return m.viewList(w, h)
 	case vLogs:
 		return m.viewLogs(w, h)
+	case vMetrics:
+		return m.viewMetrics(w, h)
 	default:
 		title := m.view.String()
 		if m.view == vDetail || m.view == vEvents {

@@ -149,17 +149,29 @@ func (m *Model) onFilterKey(msg tea.KeyMsg) tea.Cmd {
 	case "esc":
 		m.filtering = false
 		m.filterIn.Blur()
-		m.filter = ""
-		m.refilter()
+		m.setFilter("")
 		return nil
 	}
 	var cmd tea.Cmd
 	m.filterIn, cmd = m.filterIn.Update(msg)
-	if v := m.filterIn.Value(); v != m.filter {
+	m.setFilter(m.filterIn.Value())
+	return cmd
+}
+
+// setFilter applies the filter input to whichever listing is on screen: the
+// resource listing, or the metrics screen's.
+func (m *Model) setFilter(v string) {
+	if m.view == vMetrics {
+		if v != m.metrics.filter {
+			m.metrics.filter = v
+			m.rebuildMetrics(m.metrics.selectedKey())
+		}
+		return
+	}
+	if v != m.filter {
 		m.filter = v
 		m.refilter()
 	}
-	return cmd
 }
 
 // refilter recomputes the visible rows.

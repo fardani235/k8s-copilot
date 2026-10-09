@@ -3,7 +3,8 @@
 Decisions made while implementing `openspec/changes/archive/2026-10-07-add-k2stui`. The design
 document's own decisions (D1–D10 there) stand unless listed under
 [Departures](#departures-from-the-design-document). Numbering here is
-independent (`K-nn`).
+independent (`K-nn`). K-25 onwards are the
+[metrics screen](#metrics-openspecchangesadd-metrics-dashboard).
 
 ## Open questions from the design, now answered
 
@@ -204,8 +205,172 @@ stale type-picker index, provider redirects, the UID check (K-03), and the
 raw-HTTP blind spot in the guard tests. Left as documented limits: the unkeyed
 hash chain and the 1000-event read (docs/security.md).
 
+## Metrics (`openspec/changes/add-metrics-dashboard`)
+
+The full reasoning, with the alternatives, is in that change's `design.md`
+(D1–D11). This is the record of what was decided.
+
+### K-25 — Usage comes from `metrics.k8s.io`, read with the dynamic client
+Two `list` calls (`nodes.metrics.k8s.io`, `pods.metrics.k8s.io`) through the
+client `internal/kube` already holds. *Why:* it is the standard source (what
+`kubectl top` reads), it needs only `list`, and it needs no new dependency —
+`go.mod` is unchanged and the guard tests pass untouched. *Rejected:* the
+kubelet Summary API (needs `nodes/proxy`, a permission that should not be
+asked for), Prometheus (has to be configured; "nothing to set up"), the typed
+`k8s.io/metrics` client (a dependency to parse two shapes), a
+`SelfSubjectAccessReview` pre-check (a `create`; and trying the read is the
+truth, asking is a prediction).
+
+### K-26 — Usage is always shown against a bound: four reads, each with its own status
+Usage is joined with `nodes` (allocatable) and `pods` (requests, limits, node,
+phase, restarts). *Why:* "how loaded" is a ratio, and "CPU-saturated or out of
+memory?" is a question about a limit — the copilot could not answer it from
+usage alone. The four reads fail independently in real clusters, so each
+carries its own status and the screen says which is missing. The two core
+reads are served from the API server's cache (`resourceVersion=0`).
+
+### K-27 — Unknown is a value of its own, and a missing source is not a table
+`metrics.Amount` has an `OK` flag and its zero value is *unknown*. A missing
+reading is `—`; a bound that is not set is `no lim` / `no req` / `none`; a
+measured zero is `0`. When the source a listing is made of is unavailable the
+listing has **no rows and no columns** — only the status. A table of dashes
+under a warning banner was rejected: at a glance it is still a table.
+
+### K-28 — Six ways to be missing, classified by attempting the read
+Absent (404: not installed), Unavailable (503/500: registered, not
+answering), Denied (403), Unauthenticated (401: credentials not accepted),
+Timed out, Failed (anything else, including a 429). Each has its own wording,
+written once in `internal/metrics`. No discovery lookup and no access review:
+the read itself is authoritative.
+
+### K-29 — One model, two renderers
+`internal/metrics` turns a `Snapshot` and a `Query` into a `Listing` that
+already holds the formatted cells, percentages, heat, caveats and the
+"unavailable" status. The screen adds colour and layout; `get_metrics` prints
+the same cells as text. Neither computes a number, so they cannot compute it
+differently. This is `kube.Summarize`'s idea (one function, shown twice) made
+stricter, because here the divergence risk is in the formatting itself.
+
+### K-30 — One cluster-wide read, and everything is cut from it
+`kube.Cluster.Metrics` keeps one cluster-wide read. Node readings always come
+from it; pod readings too, a namespace's by narrowing. Only when the cluster
+refuses the pods of the whole cluster are a namespace's pods read separately —
+and joined to the same node readings. The tool accepts readings up to 15 s
+old, so with the screen open the copilot is handed what is on the screen; when
+it has to read for itself, the screen takes up those readings as the tool call
+ends. Concurrent callers share one detached read (20 s bound). Both renderings
+state the sample's age, so the one residual difference — the screen refreshing
+while the model is composing its answer — is visible.
+
+*This replaced a per-scope cache* (a snapshot per namespace beside the
+cluster-wide one), which the review showed could hand the copilot and the
+screen different readings of the same pod. See K-38.
+
+### K-31 — The hierarchy is three tabs and a drill-down path
+Nodes / namespaces / pods at the top; `enter` goes node-or-namespace → pods →
+containers; `esc` goes back up one level, onto the row it came from. *Why not
+a tree:* two hierarchies (node → pod, namespace → pod) over the same pods, and
+thousands of leaves. *Why not stacked panels:* four rows each at 80×24, nothing
+at all beside the copilot. Sorted busiest-first; the cursor follows the row,
+not the position.
+
+### K-32 — Cluster-wide by default; the browser's namespace when refused
+The screen opens on the whole cluster whatever the browser's namespace — the
+hierarchy is the scoping mechanism. If pod metrics are refused cluster-wide it
+falls back to the browser's namespace and says so on the screen; each refresh
+asks for the whole cluster again, so it widens by itself if the refusal is
+lifted. Per-node pod
+counts are not shown in a namespace-scoped view (a partial count would read as
+a total).
+
+### K-33 — Refresh at the pace of the source; say how old the sample is
+Every `max(refresh_interval, 10s)`, only while visible, never over an
+outstanding read. metrics-server samples every 15 s; faster polling repeats
+numbers. The title shows the age of the *sample* (the older of the node and
+pod samples) and flags it past 90 s. A redraw timer keeps that age counting on
+an untouched screen, including with refresh off.
+
+### K-34 — Hold-over: 60 s, always marked
+A refresh that gets no usage after one that did keeps the earlier readings on
+show for at most 60 s, with the title and a note saying they are not current
+and why; then the unavailable state replaces them. *Why:* a flaky source
+should not flip the screen between data and error every ten seconds, and old
+numbers should not outstay a warning nobody reads. It lives in the shared
+cache, so the copilot gets the same marked snapshot.
+
+### K-35 — Heat only against hard bounds; thresholds shared
+Amber at 75 %, red at 90 % of allocatable or of a limit. Usage above a
+*request* is normal and is not flagged. The same constants decide the screen's
+colour and the tool's `elevated` / `HIGH`. A pod row takes its heat from its
+containers — limits bind containers, not pods — and names the container.
+
+### K-36 — `M`, and no configuration
+Capitals open full screens (`A`). `m` is maximize; `u` would shadow the detail
+view's half-page-up. No new settings: `refresh_interval` is honoured, with a
+10 s floor for this screen.
+
+### K-37 — Degrade in a fixed order; the renderer bounds itself
+Columns have a drop order (bars, node, request percentages, absolutes; never
+name, CPU, MEM); gauges go full → stacked → abbreviated → shares only; the
+sample's age outranks the breadcrumb. `fitBox` guarantees the screen never
+hands its pane more lines or wider lines than it has.
+
+Found while testing this on a real terminal, and fixed although it predates
+the change: the "copilot is not available" text was not cut to its pane, so a
+long reason (a real `openrouter` configuration) pushed the pane's bottom
+border off a 60×16 screen. `tui.TestUnavailableCopilotKeepsItsFrame`.
+
+### K-38 — Independent review before hand-over
+As with the approval path (K-24), the change was handed to a separate reviewer
+with the four promises (honesty, consistency, read-only, robustness) and
+without the design rationale, and asked to break it with reproductions.
+
+**What held.** No input produced a table of rows or a zero from a missing
+source, on the screen or in the tool; a measured zero stayed zero; held
+readings were always marked and expired; no race, deadlock, goroutine leak or
+panic under concurrent load and 1010 malformed-input variants; only `list`
+requests on the wire; no overflow at any pane size from 0 to 130 columns with
+wide, combining, bidirectional and control characters in names.
+
+**What did not, and was fixed.** Every item below was reproduced, fixed, and
+given a test that fails without the fix.
+
+| Finding | Fix |
+|---|---|
+| A per-namespace cache entry could outlive a newer cluster-wide read: the screen showed a pod at 99 % of its limit, the copilot was told 16 %. Likewise held on the screen but "unavailable" from the tool; a namespace failure shadowing a later success | One cluster-wide read that everything is cut from (K-30). `kube.TestMetricsAreCoherentAcrossScopes` |
+| With refresh off or an interval over 15 s, the tool read fresh numbers the screen did not have | The screen takes up the tool's readings when the call ends. `tui.TestScreenAdoptsWhatTheCopilotRead` |
+| A running init container was shown with requests and limits of "none" and measured against the limits of containers not yet started — at 100 % of its real limit, unflagged | Init and ephemeral containers keep their declared bounds and are listed when running; a container the spec does not describe is `—`, not "none". `metrics.TestRunningInitContainerKeepsItsBounds` |
+| A sample with no containers was shown as `0m` / `0%` (the code's own comment said this was right; it was not — nothing was measured) | No containers, no reading. `metrics.TestSampleWithoutContainersIsNotZero` |
+| CPU was rounded up to a millicore per container before summing: 300 idle containers read 300m, and a node's reading disagreed with the sum of its pods | Nanocores throughout, rounded for display only. `metrics.TestSmallReadingsAreNotRoundedUpBeforeAdding` |
+| "No pods in namespace X" for a namespace that had not been read, after the screen was limited to another one mid-session | The listing says the namespace was not read; the screen goes back to the top and says why; it widens again by itself when the refusal is lifted. `tui.TestMetricsDoesNotCallAnUnreadNamespaceEmpty` |
+| With refresh off, "sampled 1s ago" stayed on the screen indefinitely | A redraw timer while the screen is showing (K-33). `tui.TestMetricsAgeKeepsCounting`; confirmed with the binary |
+| In the 24-column pane the filter was invisible, typing it and afterwards | The filter and "N of M" go first on the line. `tui.TestMetricsFilterIsVisibleInANarrowPane` |
+| The row under the cursor — by default the hottest — was not drawn in its heat colour | The selected style keeps the heat foreground. `tui.TestSelectedRowKeepsItsHeat` |
+| The tool's size cap cut the caveats and legend off a long listing, whose header still claimed 200 rows | Caveats come before the table, and rows are dropped — and counted — to fit. `tools.TestMetricsToolKeepsItsCaveatsWhenShortened` |
+| A pod's limit share hid a container at its limit beside a roomy neighbour | Row heat comes from the containers (K-35). `metrics.TestPodIsAsHotAsItsHottestContainer` |
+| A cluster percentage over nodes whose capacity was only partly known; a metrics-only pod shown on node `<none>`; hostile quantities overflowing | `metrics.TestClusterShareNeedsEveryReportingNodesCapacity`, `TestPodKnownOnlyToTheMetricsAPI`, `TestAbsurdQuantitiesAreUnknown` |
+| 401 explained as a missing permission; 429 as "metrics-server is down" | A sixth state; 429 is "failed" with the server's words (K-28) |
+| The newest sample of either source vouched for both | The age is the older source's. `metrics.TestSampleTimeIsTheOlderSource` |
+| `M` from a view opened from the metrics screen reset its drill-down; a metrics API returning empty pages with a continue token was followed for 20 s; a name with a newline could forge a row in the text the model reads; the "unavailable" wording was drawn unsanitised | `tui.TestMetricsKeyReturnsToTheOpenScreen`, `kube.TestMetricsPagingCannotLoop`, `metrics.TestTableTextCannotBeForged` |
+
+The reviewer also named four tests that passed without proving what their
+comments claimed; each was rewritten (`TestCopilotSeesWhatTheScreenShows`'s
+heat check, `TestMetricsTextIsSanitized` checking stripped output,
+`TestMetricsCallerCanStopWaiting` asserting no timing, and the "read once"
+tests covering one scope only).
+
+**Left as documented limits**: a local clock behind the cluster's makes an old
+sample look new; long caveats are cut (with a marker) in a 12-line pane full
+of rows; the summary above a filtered listing still describes the whole
+level; a 429 costs client-go's own retries before it is reported; the
+handling of running init containers was tested with constructed samples
+only.
+
 ## Not done, on purpose
 
+- No metrics history, trends, graphs or alerts; no source other than
+  `metrics.k8s.io`; no CPU/MEM columns in the ordinary listings (argued for as
+  the next step in the metrics change's `design.md`).
 - No delete / apply / patch / image / exec / cordon / drain (out of scope for
   this change).
 - No in-app context switching, no multi-cluster.

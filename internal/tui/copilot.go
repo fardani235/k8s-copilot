@@ -86,7 +86,9 @@ func (m *Model) viewCopilot(w, h int) string {
 	if m.deps.Agent == nil {
 		msg := stWarn.Render("The copilot is not available.") + "\n\n" + wrap(m.deps.AgentErr, w) +
 			"\n\n" + stDim.Render(wrap("The browser works without it. Nothing can be changed in the cluster from here.", w))
-		return b.String() + msg
+		// A long reason in a short pane is cut, not allowed to push the
+		// pane's frame off the screen.
+		return b.String() + fitLines(msg, h-1)
 	}
 	if len(m.transcript) == 0 {
 		m.chat.SetContent(stDim.Render(wrap(

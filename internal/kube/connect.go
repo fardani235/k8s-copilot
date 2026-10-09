@@ -165,6 +165,7 @@ type Cluster struct {
 	baseURL *url.URL
 
 	typeCache typeCache
+	metrics   metricsCache
 }
 
 // Connect resolves the kubeconfig, builds the clients, and probes the server

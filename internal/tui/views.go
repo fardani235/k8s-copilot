@@ -72,6 +72,17 @@ func (m *Model) onSubjectLoaded() tea.Cmd {
 		return m.loadEvents()
 	case vLogs:
 		m.logs.containers = kube.Containers(m.subj.obj)
+		found := m.logs.want == ""
+		for i, c := range m.logs.containers {
+			if c == m.logs.want {
+				m.logs.ci, found = i, true
+			}
+		}
+		if !found {
+			// Do not show another container's logs as if they were the one
+			// that was asked for.
+			m.status = fmt.Sprintf("container %s is not in this pod's spec — showing %s", textutil.Sanitize(m.logs.want), m.logs.container())
+		}
 		return m.startLogs()
 	}
 	return nil
@@ -266,8 +277,26 @@ BROWSER
   /                         filter the listing
   r                         refresh now
   esc                       back
+  M                         metrics: how loaded the cluster is right now
   A                         audit trail
   q, ctrl+c                 quit
+
+METRICS (M)
+  Current CPU and memory from the cluster's metrics API, read-only, set
+  against node capacity and pod requests and limits. It refreshes itself.
+  1 2 3, ← →                nodes / namespaces / pods
+  enter                     drill down: a node's or namespace's pods, then a
+                            pod's containers
+  esc                       back up one level, then out
+  s                         sort by cpu, memory or name
+  /                         filter by name
+  l  e  d                   logs, events, detail of the selected row
+  r                         read again now
+  —  means there is no reading. It never means zero. If the metrics API is
+  missing, broken or not permitted, the screen says which, instead of
+  showing an empty table.
+  %CPU/R %MEM/R are usage as a share of requests, %CPU/L %MEM/L of limits.
+  Rows turn amber at 75% of a hard bound (allocatable, limit), red at 90%.
 
 COPILOT
   c                         show / hide the pane
@@ -308,14 +337,17 @@ type logState struct {
 	lines      []string
 	containers []string
 	ci         int
-	follow     bool
-	previous   bool
-	done       bool
-	err        error
-	seq        int
-	cancel     context.CancelFunc
-	ch         chan logChunk
-	vp         viewport.Model
+	// want is the container to start on, when the logs were opened from a
+	// particular container (the metrics screen); empty for the pod's first.
+	want     string
+	follow   bool
+	previous bool
+	done     bool
+	err      error
+	seq      int
+	cancel   context.CancelFunc
+	ch       chan logChunk
+	vp       viewport.Model
 }
 
 type logChunk struct {
@@ -340,7 +372,7 @@ func (l *logState) stop() {
 func (l *logState) reset() {
 	l.stop()
 	l.lines, l.containers, l.ci, l.done, l.err = nil, nil, 0, false, nil
-	l.follow, l.previous = false, false
+	l.follow, l.previous, l.want = false, false, ""
 }
 
 func (l *logState) container() string {

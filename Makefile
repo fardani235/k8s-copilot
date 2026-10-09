@@ -12,7 +12,7 @@ test: ## unit tests (no cluster, no model needed)
 	go test ./...
 
 race: ## the concurrent packages under the race detector
-	go test -race ./internal/agent/ ./internal/tui/ ./internal/audit/ ./internal/tools/
+	go test -race ./internal/agent/ ./internal/tui/ ./internal/audit/ ./internal/tools/ ./internal/kube/ ./internal/metrics/
 
 vet:
 	go vet ./...

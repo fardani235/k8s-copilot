@@ -12,7 +12,7 @@ stop.
 | The agent has no way to run a command | No `os/exec`, `syscall`, `plugin` anywhere in the module; the model can only name a registered tool | `guard.TestNothingCanRunASubprocess` |
 | Only one package can reach the cluster | Only `internal/kube` imports client-go clients | `guard.TestOnlyKubePackageTalksToTheAPI` |
 | There is exactly one write call, and it can only patch | `kube.Cluster.MergePatch` in `write.go`; no create/update/delete/apply/evict call exists | `guard.TestSingleWritePath` |
-| Only the four curated verbs can reach that write | `MergePatch` is called only from `tools/mutate.go` plans; the registry holds exactly 5 read + 4 mutate tools | `guard.TestSingleWritePath`, `tools.TestRegistryContents` |
+| Only the four curated verbs can reach that write | `MergePatch` is called only from `tools/mutate.go` plans; the registry holds exactly 6 read + 4 mutate tools | `guard.TestSingleWritePath`, `tools.TestRegistryContents` |
 | A mutate tool cannot be executed, only planned | `Registry.Read` refuses mutate tools; `Registry.Plan` returns a `Plan` and sends nothing | `tools.TestTiersCannotBeCrossed`, `TestMutationPatchShapes` |
 | A plan is applied only with a human approval **for that plan** | `Plan.Apply` requires an `approval.Grant` matching the request digest; a `Grant` can only be created by `Gate.Ask` on approve | `tools.TestMutationPatchShapes` (nil / forged grant), `TestDryRunChangesNothingAndGrantsAreBound`, `guard.TestApplyIsOnlyCalledFromTheGatedPath` |
 | The gate never proceeds by itself | `Gate.Ask` selects only on the human's reply and on cancellation; the package has no timers | `guard.TestGateHasNoTimers`, `agent.TestUnansweredProposalNeverApplies`, `tools.TestGateBlocksUntilDecision` |
@@ -25,6 +25,8 @@ stop.
 | The audit trail cannot be rewritten by the app | Opened `O_APPEND|O_WRONLY`; no truncate/remove/rename/seek in the package | `guard.TestAuditIsAppendOnly` |
 | Tampering is detectable | Hash chain + canonical-form check + head anchor (a missing anchor is itself a failure) | `audit.TestTamperingIsDetected` (10 kinds), `TestTruncationWithHeadRemoved` |
 | The raw HTTP client used for listings can only GET | One request constructor, method fixed to `http.MethodGet` | `guard.TestSingleWritePath` |
+| Reading metrics changes nothing and asks for nothing | Four `list` calls through the dynamic client; no access review, no create; the guard tests above pass unchanged | `kube.TestMetricsJoinsUsageWithBounds` (no mutating action), `kube.TestMetricsOverTheWire` (GET only), `guard.TestSingleWritePath` |
+| Missing metrics are never reported as zero usage | Unknown is a distinct value; a listing without its source has no rows; the tool returns an error | `metrics.TestUnknownIsNeverZero`, `TestMissingSourceIsAStateNotATable`, `tools.TestMetricsToolSaysWhenTheSourceIsMissing` |
 
 The `guard` tests read the source tree, so they fail the moment someone adds,
 say, a `Delete` call or an `os/exec` import — they are the reviewer that never
@@ -102,6 +104,10 @@ provider you configured. To limit that:
   false` turns this off.) The browser itself shows Secrets as the API returns
   them, like `kubectl get -o yaml`.
 - Tool results are size-capped (`max_result_bytes`).
+- `get_metrics` sends the names of nodes, namespaces, pods and containers
+  together with their CPU and memory figures, requests, limits and restart
+  counts — nothing from inside a workload. It is the same kind of data
+  `list_resources` already sends.
 - **Not** covered: secrets that appear in pod logs, in plain `env` values in a
   pod spec, or in ConfigMaps. If your cluster has those, they can reach the
   provider when the agent reads them. Use a provider you are allowed to send
@@ -124,6 +130,13 @@ ServiceAccount is deliberately deferred (see the proposal). Permission errors
 are always reported as permission errors — to you and to the model — never as
 "nothing found".
 
+The metrics screen needs `list` on `nodes` and `pods` in `metrics.k8s.io` (and
+on core `nodes` and `pods`). It does not check or request these: it tries, and
+if the cluster refuses, the screen and the copilot say "permission denied".
+Someone with access to one namespace only gets that namespace. Nothing is
+installed: on a cluster without metrics-server the screen says there are no
+metrics.
+
 ## Known limits (read these)
 
 - **Dry-run is not a guarantee.** It proves the API server accepted the request
@@ -136,6 +149,16 @@ are always reported as permission errors — to you and to the model — never a
   the "after" state you approved.
 - **Events are read 1000 at a time** with no continuation; in a very busy
   namespace the oldest may be missing.
+- **Metrics are a sample, and its age is measured against your clock.** The
+  metrics API reports usage averaged over a window (15 s by default) with the
+  cluster's timestamp. The "sampled … ago" on the screen compares that with
+  the local clock, so a machine whose clock is off shows a wrong age (and, if
+  it is more than 90 s ahead, a permanent "OLD" flag). Memory is working-set
+  memory, which is what the OOM killer acts on.
+- **Metrics on a very large cluster.** Each refresh lists every pod (served
+  from the API server's cache, at most every 10 s, only while the screen is
+  open). Beyond 20 000 items a source is cut and the screen says the totals
+  are partial.
 - **An "applying" entry with no result after it** means the process died (or
   the request timed out) after approval and before the result was recorded.
   The change may or may not have landed: check the cluster. The trail tells you

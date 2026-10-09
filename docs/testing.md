@@ -5,12 +5,15 @@ make test     # go test ./...        — no cluster and no model needed
 make vet      # go vet + gofmt check
 make race     # the concurrent packages under -race
 make live     # opt-in: read-only + dry-run against your CURRENT kube context
+              # (-run LiveMetrics alone sends list requests only)
 ```
 
 ## How it is tested without a cluster or a model
 
 - **Cluster**: `internal/kube/kubetest` builds a `kube.Cluster` on client-go's
-  fake dynamic and typed clients, with a fake discovery that can fail. The
+  fake dynamic and typed clients, with a fake discovery that can fail. It can
+  also serve the metrics API — or, by default, not serve it (404, like a
+  cluster without metrics-server), or fail it with any error. The
   stock fakes persist a patch even when it is a dry-run, so the fake intercepts
   every patch: it records it, lets a test inject a rejection (Forbidden,
   Conflict, admission), and for a dry-run returns the object unchanged. That is
@@ -64,6 +67,75 @@ make live     # opt-in: read-only + dry-run against your CURRENT kube context
 | 8.3 manual smoke | **partly — see below** |
 | 8.4 refusals in the running binary | automated equivalent passes (`tools.TestUnsupportedMutationsAreRefused`, `agent.TestUnknownToolGoesBackAsError`); **by hand: pending** |
 
+## The metrics screen (`add-metrics-dashboard`)
+
+What has to be true, and what shows it:
+
+| Property | Verified by |
+|---|---|
+| A missing reading is `—`, a measured zero is `0`, "not set" is neither | `metrics.TestUnknownIsNeverZero`, `kube.TestMetricsJoinsUsageWithBounds` |
+| A missing source is a stated reason, never a table | `metrics.TestMissingSourceIsAStateNotATable`, `tui.TestMetricsUnavailableIsSaidPlainly`, `tools.TestMetricsToolSaysWhenTheSourceIsMissing` |
+| Not installed / not answering / not permitted / too slow are told apart | `kube.TestMetricsSourceStates`, `kube.TestMetricsOverTheWire` (real HTTP: 404, plain-text 503, 403, a hang) |
+| One source missing leaves the others working, with the caveat stated | `metrics.TestPartialSources`, `tui.TestMetricsWithPartialPermissions` |
+| Read-only: `list` and nothing else | `kube.TestMetricsJoinsUsageWithBounds` (no mutating action), `kube.TestMetricsOverTheWire` (every request is a GET), `guard.TestSingleWritePath` (unchanged) |
+| Units are read correctly (nanocores, Ki) | `kube.TestMetricsOverTheWire` — metrics-server's wire format, through the real client |
+| Node → pods → containers, namespace → pods → containers, and back to the same row | `tui.TestMetricsScreenDrillDown` |
+| Sort, filter, a cursor that follows the row through a refresh | `tui.TestMetricsSortFilterAndStickyCursor` |
+| The copilot is given the snapshot on the screen, and the same cells | `tui.TestCopilotSeesWhatTheScreenShows`, `kube.TestMetricsAreSharedNotRefetched`, `metrics.TestNarrowKeepsTheReadings` |
+| Copilot and screen say the same when there are no metrics | `tui.TestCopilotAndScreenAgreeWhenMetricsAreMissing`, `agent.TestMissingMetricsReachTheModelAsUnknown` |
+| Refreshes itself while visible, at the source's pace, never over an outstanding read | `tui.TestMetricsRefreshesItself` |
+| A failed refresh keeps the last readings, marked, for a bounded time | `kube.TestMetricsHoldOverIsLabelled`, `kube.TestHeldReadingsExpire`, `tui.TestMetricsRefreshFailureIsMarked`, `tools.TestMetricsToolFlagsHeldReadings` |
+| A hung metrics API does not hang the interface or other requests | `tui.TestMetricsSlowSourceDoesNotBlock`, `kube.TestMetricsOverTheWire/slow`, `kube.TestMetricsCallerCanStopWaiting` |
+| Small terminals: nothing drawn outside the pane, essentials kept | `tui.TestMetricsOnSmallTerminals` (reachable sizes, and the renderer directly below them), `tui.TestUnavailableCopilotKeepsItsFrame` |
+| Names and server messages cannot drive the terminal | `tui.TestMetricsTextIsSanitized` |
+| A snapshot shared between the UI and the agent is never written to | `metrics.TestSnapshotIsSafeToShare` under `-race` |
+| Whole cluster or one namespace, in any order: the same readings | `kube.TestMetricsAreCoherentAcrossScopes` |
+| When the copilot had to read for itself, the screen takes up what it read | `tui.TestScreenAdoptsWhatTheCopilotRead` |
+| A running init container keeps its own limit; a container not in the spec is `—`, not "none" | `metrics.TestRunningInitContainerKeepsItsBounds` |
+| Nothing measured is never `0`; small readings are summed before rounding | `metrics.TestSampleWithoutContainersIsNotZero`, `TestSmallReadingsAreNotRoundedUpBeforeAdding`, `TestAbsurdQuantitiesAreUnknown` |
+| A pod is as hot as its hottest container | `metrics.TestPodIsAsHotAsItsHottestContainer` |
+| The sample's age is the older source's and keeps counting | `metrics.TestSampleTimeIsTheOlderSource`, `tui.TestMetricsAgeKeepsCounting` |
+| An unread namespace is not called empty | `metrics.TestNamespaceOutsideWhatWasRead`, `tui.TestMetricsDoesNotCallAnUnreadNamespaceEmpty` |
+| Expired credentials are not described as a missing permission | `kube.TestMetricsSourceStates`, `tui.TestMetricsExpiredCredentialsAreSaidToBeThat`, `tools.TestMetricsToolExpiredCredentials` |
+| A long tool result loses rows, never its caveats; a name cannot forge a row | `tools.TestMetricsToolKeepsItsCaveatsWhenShortened`, `metrics.TestTableTextCannotBeForged` |
+| The filter shows in the narrowest pane; the selected row keeps its colour | `tui.TestMetricsFilterIsVisibleInANarrowPane`, `tui.TestSelectedRowKeepsItsHeat` |
+
+**The tests were checked against themselves.** Twenty-three things were
+deliberately broken, one at a time, and each made the suite fail: eight of the
+original properties — an unknown reading formatted as `0m`; a listing built
+without its source; the tool re-reading instead of sharing; a 403 classified
+as "not installed"; polling over an outstanding read; a held snapshot left
+unmarked; a `Delete` call added to `internal/kube`; the width guarantee
+removed — and then each of the fifteen review fixes, reverted in turn. One
+mutation (rows not clipped) survived at first because nothing reachable
+exercised it; the test that now covers it also found that the renderer did
+not bound its own height.
+
+**An independent adversarial review** (decisions K-38) then found what the
+author's tests had not: chiefly, three ways the copilot and the screen could
+be handed different readings of the same pod. It reproduced each finding with
+a throwaway test; each fix has a regression test (the last eleven rows of the
+table above), and four tests it showed to be weaker than their comments were
+rewritten. It also reported what held up under attack — see K-38.
+
+**Against a real API server** (minikube, Kubernetes v1.35.1, which has *no*
+metrics-server), on 2026-10-09:
+
+- `K8S_COPILOT_LIVE=1 go test ./internal/tools -run LiveMetrics -v` — the 404
+  was classified as "not installed"; the node and pod reads (served from the
+  API server's cache) succeeded; `get_metrics` returned its error result
+  ("Usage is UNKNOWN, not zero…") at all three levels tried. This test sends
+  `list` requests only.
+- The built binary in a real terminal (tmux, 120×32): `M` showed "Metrics are
+  not available on this cluster" with the server's message; the screen retried
+  by itself every 10 s; at 60×16 beside the copilot both panes kept their
+  frames; below the minimum the usual "terminal too small" message appeared;
+  `q` exited with status 0 and a clean terminal. Run again after the review
+  fixes with `--refresh off`: left untouched, the title went from "read 0s
+  ago" to "read 10s ago".
+
+That run is also what found the copilot pane overflow recorded in K-37.
+
 ## Independent review
 
 Before hand-over the approval path was reviewed adversarially by a separate
@@ -115,6 +187,20 @@ a model API key being spent, and a change being approved on a cluster.
 6. **Out-of-scope requests** (8.4): ask it to delete a pod, to change an
    image, to apply a manifest. Expected: it explains it cannot, and tells you
    how to do it yourself; nothing is proposed.
+7. **The metrics screen against a real metrics-server** (metrics change, task
+   6.5). Everything about the happy path is tested with fakes and with an HTTP
+   server that speaks metrics-server's wire format, but it has not been
+   watched on a live cluster: the one available has no metrics-server, and
+   installing one is a change to your cluster that was not this work's to
+   make. On minikube: `minikube addons enable metrics-server`, wait a minute,
+   press `M`. Compare the Nodes tab with `kubectl top nodes` and a namespace's
+   pods with `kubectl top pods -n <ns> --containers`; drill into a pod; resize
+   the window; then `minikube addons disable metrics-server` and watch the
+   screen mark its readings as not current and, after a minute, say why there
+   are none.
+8. **Ask the copilot about load** (metrics change, task 6.6): with the metrics
+   screen open, ask why a workload is slow. Expected: it calls `get_metrics`,
+   and the figures it quotes are the ones on the screen.
 
 A throwaway target for 4–6:
 

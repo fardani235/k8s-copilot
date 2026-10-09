@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/fardani235/k8s-copilot/internal/kube"
+	"github.com/fardani235/k8s-copilot/internal/metrics"
 	"github.com/fardani235/k8s-copilot/internal/tools"
 )
 
@@ -125,4 +126,84 @@ func TestLiveClusterReadOnly(t *testing.T) {
 		}
 	}
 	t.Logf("verified: %s/%s unchanged (generation %d, %d replicas)", nsName, depName, after.GetGeneration(), replicas)
+}
+
+// TestLiveMetricsReadOnly reads the current context's load the way the
+// metrics screen and get_metrics do, and checks that whatever the cluster
+// answers is understood: readings where there are readings, and a stated
+// reason — never zeros — where there are not.
+//
+// It is opt-in (K8S_COPILOT_LIVE=1), uses the current kubeconfig context and
+// sends list requests only.
+//
+//	K8S_COPILOT_LIVE=1 go test ./internal/tools -run LiveMetrics -v
+func TestLiveMetricsReadOnly(t *testing.T) {
+	if os.Getenv("K8S_COPILOT_LIVE") != "1" {
+		t.Skip("set K8S_COPILOT_LIVE=1 to run against the current kubeconfig context (read-only)")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	c, err := kube.Connect(ctx, kube.ConnectOptions{UserAgent: "k8s-copilot-live-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("connected: context %s, server %s", c.Info.Context, c.Info.Server)
+
+	s := c.Metrics(ctx, kube.AllNamespaces, 0)
+	for _, st := range []metrics.SourceStatus{s.Sources.NodeMetrics, s.Sources.PodMetrics, s.Sources.Nodes, s.Sources.Pods} {
+		t.Logf("%-12s %s — %s", st.Source, st.Headline(), st.Reason)
+		if st.State == metrics.Failed {
+			t.Errorf("%s failed in a way k8s-copilot does not recognise: %s", st.Source, st.Reason)
+		}
+	}
+	if !s.Sources.Nodes.OK() || len(s.Nodes) == 0 {
+		t.Fatalf("no nodes read: %+v", s.Sources.Nodes)
+	}
+
+	r := tools.NewRegistry(c, tools.DefaultOptions())
+	for _, a := range []M{{"level": "nodes"}, {"level": "namespaces"}, {"level": "pods", "namespace": "kube-system", "limit": 5}} {
+		out, err := r.Read(ctx, "get_metrics", args(a))
+		switch {
+		case err != nil && s.HasUsage() && s.Sources.PodMetrics.OK() && s.Sources.NodeMetrics.OK():
+			t.Errorf("get_metrics %v failed although the metrics API answers: %v", a, err)
+		case err != nil:
+			t.Logf("get_metrics %v → (as an error result)\n%v", a, err)
+			if !strings.Contains(err.Error(), "UNKNOWN, not zero") {
+				t.Errorf("the model is not told that usage is unknown: %v", err)
+			}
+		default:
+			t.Logf("get_metrics %v →\n%s", a, out)
+		}
+	}
+
+	if s.HasUsage() {
+		// Readings: every node the cluster lists has one, or is marked.
+		for _, n := range s.Nodes {
+			if !n.CPU.OK && n.Ready == "Ready" {
+				t.Logf("note: Ready node %s has no sample yet", n.Name)
+			}
+			if n.CPU.OK && n.CPUAlloc.OK && n.CPU.V > n.CPUAlloc.V*2 {
+				t.Errorf("node %s: CPU usage %dm against %dm allocatable — a unit is being misread", n.Name, n.CPU.V, n.CPUAlloc.V)
+			}
+		}
+		if s.SampleTime.IsZero() {
+			t.Error("readings without a sample time")
+		}
+		t.Logf("freshness: %s", s.Freshness(time.Now()).Text)
+	} else {
+		// No readings: nothing may claim one.
+		for _, n := range s.Nodes {
+			if n.CPU.OK || n.Mem.OK {
+				t.Errorf("node %s has a reading although the metrics API gave none", n.Name)
+			}
+		}
+		for _, p := range s.Pods {
+			if p.CPU.OK || p.Mem.OK {
+				t.Errorf("pod %s has a reading although the metrics API gave none", p.Key())
+			}
+		}
+		if s.Cluster.CPU.OK {
+			t.Error("cluster totals claim a reading")
+		}
+	}
 }

@@ -3,9 +3,9 @@
 A terminal Kubernetes browser with an AI copilot beside it.
 
 Browse the cluster the way you already do, and ask it things — *"why does this
-pod keep restarting?"* — and it goes and looks: logs, events, owners, config. It
-comes back with an explanation, and when the fix is clear it can offer to make
-it.
+pod keep restarting?"* — and it goes and looks: logs, events, owners, config,
+CPU and memory. It comes back with an explanation, and when the fix is clear it
+can offer to make it.
 
 **It can look at anything you can. It changes nothing on its own.** When it
 wants to change something it shows you exactly what, and waits — for as long as
@@ -76,6 +76,7 @@ prints what is in effect (never the key).
 | `/` | filter the listing |
 | `r` | refresh now (it also refreshes every 5s) |
 | `esc` | back |
+| `M` | metrics: how loaded the cluster is right now ([below](#metrics)) |
 | `A` | audit trail |
 | `?` | help |
 | `q`, `ctrl+c` | quit |
@@ -85,6 +86,62 @@ prints what is in effect (never the key).
 `enter` sends, `esc` cancels a running request, `ctrl+l` starts a new
 conversation. It is told what you are looking at (context, namespace, type,
 selected resource) with every question, so "this pod" just works.
+
+### Metrics
+
+`M`, from anywhere in the browser, shows how busy the cluster is right now —
+nodes, namespaces and pods, down to a single container:
+
+```
+ metrics · cluster                                              sampled 8s ago · 15s window
+ cluster  █████░░░░░ CPU 3.1 of 6 allocatable (52%)   ████████░░ memory 9.8Gi of 12Gi allocatable (82%)
+ 2 nodes · 4 pods in all namespaces
+  1 nodes (2)  2 namespaces (2)  3 pods (4)   by cpu ↓
+ NODE    CPU  %CPU                MEM  %MEM              PODS
+ node-b  1.9   95%  ██████████  3.8Gi   95%  ██████████     1
+ node-a  1.2   30%  ███░░░░░░░    6Gi   75%  ████████░░     2
+```
+
+| Key | |
+|---|---|
+| `1` `2` `3`, `← →` | nodes / namespaces / pods |
+| `enter` | drill down: a node's or a namespace's pods, then a pod's containers |
+| `esc` | back up one level, then out |
+| `s` | sort by cpu, memory, name |
+| `/` | filter by name |
+| `l` `e` `d` | logs, events, detail of the selected row |
+| `r` | read again now (it also re-reads by itself, about every 10s) |
+
+Usage is shown against what bounds it: a node's allocatable, a pod's requests
+(`%CPU/R`, `%MEM/R`) and limits (`%CPU/L`, `%MEM/L`). A row turns amber at 75%
+and red at 90% of a hard bound — close to a memory limit an OOM kill is near,
+at a CPU limit the container is being throttled.
+
+It reads the cluster's own metrics API, the one `kubectl top` uses. It is
+read-only, needs no extra permission, and installs nothing. So when that API is
+not there, the screen says so instead of showing an empty table:
+
+```
+ Metrics are not available on this cluster
+
+ The API server does not serve the metrics API (metrics.k8s.io), so there are
+ no CPU or memory readings to show. That usually means metrics-server, or an
+ equivalent, is not installed. k8s-copilot only reads what the cluster already
+ offers: it installs nothing.
+```
+
+"Not installed", "installed but not answering", "you are not allowed to read
+it", "your credentials were not accepted" and "too slow" are five different
+messages. A reading that is missing is
+drawn as `—`, **never as 0**; a limit that is not set is `no lim`. If you may
+read metrics only in your own namespace, you get that namespace and are told
+that is what you are looking at. If a refresh fails, the last readings stay for
+up to a minute, marked as not current.
+
+The copilot reads the same numbers (`get_metrics`) — the very readings on the
+screen if it is open — so when you ask why something is slow it can check
+whether it is actually CPU-saturated or short of memory, and what it tells you
+matches what you see. There is no history: this is a picture of now.
 
 **When it proposes a change** a dialog takes over the screen:
 
@@ -123,7 +180,7 @@ cluster, not written by the model.
 
 | | |
 |---|---|
-| **Reads, freely** | list any resource type, get, describe, pod logs, events |
+| **Reads, freely** | list any resource type, get, describe, pod logs, events, current CPU and memory usage |
 | **Proposes, and waits** | `scale` (Deployment/StatefulSet/ReplicaSet), `rollout_restart` (Deployment/StatefulSet/DaemonSet), `set_labels`, `set_annotations` |
 | **Cannot, at all** | delete, create, apply or patch manifests, change images, exec, port-forward, cordon/drain — there is no code path for these |
 
@@ -157,6 +214,7 @@ change.
 - [docs/testing.md](docs/testing.md) — what is tested, how, and what still needs a human
 - [CHANGELOG.md](CHANGELOG.md)
 - [openspec/changes/archive/2026-10-07-add-k2stui/](openspec/changes/archive/2026-10-07-add-k2stui/) — the requirements this implements
+- [openspec/changes/add-metrics-dashboard/](openspec/changes/add-metrics-dashboard/) — the metrics screen: proposal, design (with the alternatives considered) and requirements
 
 ## Status
 
@@ -165,3 +223,8 @@ the read paths and all four patch shapes have been checked (dry-run only)
 against a real API server. Two things from the task list still need you at a
 keyboard — an interactive smoke test with a real model, and one approved change
 end to end. See [docs/testing.md](docs/testing.md#still-to-do-by-hand).
+
+The metrics screen (`add-metrics-dashboard`) is implemented and tested, and its
+"no metrics API" state has been checked against a real API server and in a real
+terminal. It has **not** yet been watched against a real metrics-server — see
+the same section.

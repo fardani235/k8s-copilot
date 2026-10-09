@@ -221,7 +221,7 @@ func TestReadToolAutoExecutes(t *testing.T) {
 		t.Fatal("a read was audited as a gated action")
 	}
 	// The model was offered exactly the registry's tools.
-	if n := len(h.stub.Requests[0].Tools); n != 9 {
+	if n := len(h.stub.Requests[0].Tools); n != 10 {
 		t.Fatalf("model was offered %d tools", n)
 	}
 }
@@ -733,6 +733,51 @@ func TestForbiddenReadReachesModel(t *testing.T) {
 	res := h.toolResults(1)
 	if !res[0].IsError || !strings.Contains(res[0].Content, "permission denied") || !strings.Contains(res[0].Content, "no RBAC rule") {
 		t.Fatalf("result: %+v", res)
+	}
+}
+
+// The copilot reads load through get_metrics like any other read: it runs by
+// itself, changes nothing and is not a gated action.
+func TestMetricsReachTheModel(t *testing.T) {
+	h := newHarness(t, agent.Limits{},
+		llm.Call(call("c1", "get_metrics", map[string]any{"level": "containers", "namespace": "shop", "pod": "web-1"})),
+		llm.Text("It is at 97% of its memory limit."),
+	)
+	h.f.SetPodMetrics("shop", "web-1", kubetest.Usage{Container: "app", CPU: "40m", Memory: "248Mi"})
+	h.run("why is this pod slow?")
+
+	res := h.toolResults(1)
+	if len(res) != 1 || res[0].IsError || !strings.Contains(res[0].Content, "pod shop/web-1: CPU 40m") || !strings.Contains(res[0].Content, "248Mi") {
+		t.Fatalf("tool result: %+v", res)
+	}
+	if got := h.f.MutatingActions(); len(got) != 0 || len(h.entries()) != 0 || len(h.seenProposals()) != 0 {
+		t.Fatalf("reading metrics was treated as a change: %v", got)
+	}
+	// The model is told how to read the numbers, and what a missing source means.
+	sys := h.stub.Requests[0].System
+	for _, want := range []string{"get_metrics", "same readings the user sees on the metrics screen", "usage is unknown", "never treat \"—\" in a metrics table as zero"} {
+		if !strings.Contains(sys, want) {
+			t.Errorf("system prompt lacks %q", want)
+		}
+	}
+}
+
+// No metrics API: the model gets an error that says so, not an empty table
+// it could read as "idle".
+func TestMissingMetricsReachTheModelAsUnknown(t *testing.T) {
+	h := newHarness(t, agent.Limits{},
+		llm.Call(call("c1", "get_metrics", map[string]any{"level": "pods", "namespace": "shop"})),
+		llm.Text("I cannot see usage: the cluster has no metrics API."),
+	)
+	h.run("is this pod busy?")
+	res := h.toolResults(1)
+	if len(res) != 1 || !res[0].IsError {
+		t.Fatalf("a missing metrics source was not an error result: %+v", res)
+	}
+	for _, want := range []string{"Metrics are not available on this cluster", "UNKNOWN, not zero", "do not describe anything as idle"} {
+		if !strings.Contains(res[0].Content, want) {
+			t.Errorf("result lacks %q:\n%s", want, res[0].Content)
+		}
 	}
 }
 
