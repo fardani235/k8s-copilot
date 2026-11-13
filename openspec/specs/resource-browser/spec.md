@@ -107,7 +107,7 @@ The system SHALL show the logs of a selected workload's containers and the event
 
 ### Requirement: Expose current focus to the copilot
 
-The system SHALL maintain and expose the current browser focus — the active namespace, the selected resource type, and the selected resource, when one is selected — so the copilot can include it in each agent turn.
+The system SHALL maintain and expose the current browser focus — the active namespace, the selected resource type, and the selected resource, when one is selected — so the copilot can include it in each agent turn. While the metrics screen is shown, the focus SHALL describe that screen: what it is listing and the node, namespace, pod or container that is selected.
 
 #### Scenario: Focus changes are available to the copilot
 
@@ -119,9 +119,14 @@ The system SHALL maintain and expose the current browser focus — the active na
 - **WHEN** the browser has a namespace and type selected but no individual resource
 - **THEN** the focus reported to the copilot describes the scope without claiming a selected resource
 
+#### Scenario: Focus on the metrics screen
+
+- **WHEN** the user is on the metrics screen with a row selected
+- **THEN** the focus reported to the copilot names the metrics screen, what it is listing, and the selected node, namespace or pod, so that "this one" refers to that row
+
 ### Requirement: Keyboard-driven layout with copilot pane
 
-The system SHALL provide keyboard navigation across namespaces, resource types, listings, and detail views; SHALL present contextual key hints; and SHALL expose the copilot as a pane that can be shown, hidden, focused, and maximized from the keyboard without losing browser context.
+The system SHALL provide keyboard navigation across namespaces, resource types, listings, detail views, and the metrics screen; SHALL present contextual key hints; and SHALL expose the copilot as a pane that can be shown, hidden, focused, and maximized from the keyboard without losing browser context.
 
 #### Scenario: Navigate and go back
 
@@ -148,6 +153,11 @@ The system SHALL provide keyboard navigation across namespaces, resource types, 
 - **WHEN** the copilot pane is maximized and then restored
 - **THEN** the browser's namespace, resource type, selection, filter, and open sub-view are unchanged
 
+#### Scenario: Open and leave the metrics screen
+
+- **WHEN** the user opens the metrics screen and later leaves it
+- **THEN** the browser's namespace, resource type, selection and filter are as they were, and the key hints shown on the metrics screen are the ones that apply there
+
 #### Scenario: Quit from any view
 
 - **WHEN** the user presses the quit key
@@ -157,3 +167,60 @@ The system SHALL provide keyboard navigation across namespaces, resource types, 
 
 - **WHEN** the terminal is resized below the minimum usable dimensions
 - **THEN** the system shows a readable message instead of a broken layout
+
+### Requirement: Reach the health screen and return from it
+
+The system SHALL provide one key, available from any browser view, that opens a
+health screen listing the cluster's current findings and what is not being
+watched. Opening it SHALL NOT change the browser's namespace, resource type,
+selection or filter, and leaving it SHALL return to the view it was opened from
+with those unchanged.
+
+#### Scenario: Open the health screen
+
+- **WHEN** the user presses the health key in any browser view
+- **THEN** the system shows the cluster's findings grouped by class, the state
+  of each class, and the age of the reading
+
+#### Scenario: Leave the health screen
+
+- **WHEN** the user leaves the health screen
+- **THEN** the system returns to the browser view it was opened from with the
+  namespace, resource type, selection and filter as they were
+
+#### Scenario: Open logs, events or detail from a finding
+
+- **WHEN** the user asks for the logs, events or detail of the selected finding
+- **THEN** the system opens the corresponding browser view for that object and
+  returns to the health screen with the same finding selected when it is
+  dismissed
+
+#### Scenario: Key hints match the screen
+
+- **WHEN** the health screen is shown
+- **THEN** the key hints describe the keys that apply there rather than the
+  listing's keys
+
+### Requirement: The focus describes the health screen
+
+While the health screen is shown, the system SHALL report that screen as the
+browser focus — that it is the health screen, what it is listing, and the
+selected finding — so the copilot resolves "this one" to that finding.
+
+#### Scenario: A finding is selected
+
+- **WHEN** the health screen is shown with a finding selected and the user asks
+  the copilot about it
+- **THEN** the focus reported to the copilot names the health screen, the
+  finding's class, and the object it concerns
+
+#### Scenario: No finding selected
+
+- **WHEN** the health screen is shown with no finding selected
+- **THEN** the focus describes the screen and its classes without claiming a
+  selected object
+
+#### Scenario: Leaving the screen restores the browser focus
+
+- **WHEN** the user leaves the health screen
+- **THEN** the focus reported to the copilot describes the browser view again

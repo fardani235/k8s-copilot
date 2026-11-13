@@ -130,3 +130,72 @@ The system SHALL report authorization and permission failures returned by the cl
 
 - **WHEN** a tool call is rejected by the cluster because the caller lacks permission
 - **THEN** the system reports the permission error to the model and the user
+
+### Requirement: The copilot can read current resource usage
+
+The system SHALL expose current CPU and memory usage to the model as a read tool covering nodes, namespaces, pods and the containers of a pod, returning the same readings the metrics screen shows. When usage cannot be obtained, the tool result SHALL say so as an error that states the cause and that usage is unknown, and SHALL NOT return zero or empty readings in its place.
+
+#### Scenario: Model reads usage
+
+- **WHEN** the model requests the metrics tool for a level of the hierarchy
+- **THEN** the system executes it immediately as a read tool and returns usage set against capacity, requests and limits, with the age of the readings
+
+#### Scenario: Metrics unavailable
+
+- **WHEN** the model requests the metrics tool and the metrics source is absent, not answering, not permitted or too slow
+- **THEN** the tool result is an error that names the cause, includes the server's message, and states that usage is unknown rather than zero
+
+#### Scenario: Result too long
+
+- **WHEN** a listing is too long to return whole
+- **THEN** the result contains fewer rows and says how many of how many, and keeps every caveat about how to read them
+
+#### Scenario: Readings are not current
+
+- **WHEN** the readings returned are older than the latest attempt to refresh them, or their sample is old
+- **THEN** the tool result says so
+
+#### Scenario: Model is instructed how to use it
+
+- **WHEN** a request is sent to the model
+- **THEN** the instructions tell it to check load with the metrics tool rather than infer it, and not to describe a workload as idle when usage is unknown
+
+### Requirement: The copilot can read the cluster's current findings
+
+The system SHALL expose the cluster's current findings to the model as a read
+tool, returning the same findings the health screen shows, with the class each
+belongs to, the object it concerns, and the state of every class. When a class
+was not watched, the result SHALL say so as a limitation of the answer and
+SHALL NOT present it as an absence of problems.
+
+#### Scenario: Model reads findings
+
+- **WHEN** the model requests the findings tool
+- **THEN** the system executes it immediately as a read tool and returns every
+  finding with its class, object, reason and age, and the state of each class
+
+#### Scenario: A class was not read
+
+- **WHEN** the model requests findings and a class is forbidden, unavailable or
+  not applicable
+- **THEN** the result names that class as not watched with the cause, and does
+  not say the cluster is healthy in that respect
+
+#### Scenario: Nothing found
+
+- **WHEN** every class was read and none produced a finding
+- **THEN** the result says that each class was watched and that no findings were
+  present, and does not claim anything beyond what was read
+
+#### Scenario: Result too long
+
+- **WHEN** the findings are too numerous to return whole
+- **THEN** the result contains fewer findings, says how many of how many, and
+  keeps every class's state
+
+#### Scenario: Model is instructed how to use it
+
+- **WHEN** a request is sent to the model
+- **THEN** the instructions tell it to check current findings with this tool
+  instead of inferring health from listings, and not to describe the cluster as
+  healthy in a respect that was not read
