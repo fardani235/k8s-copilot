@@ -13,13 +13,16 @@ internal/
     logs_events.go      pod logs, events
     describe.go         key-field summary, YAML
     metrics.go          the four reads behind the metrics screen, shared cache
+    health.go           typed, capped reads behind the health screen, shared observation
     write.go            MergePatch — the one write call in the program
     kubetest/           fake cluster for tests
   metrics             the one model of "how busy is it": Snapshot → Listing (no I/O)
+  health              the one model of "what is broken": Observation → Report (no I/O)
   tools               the typed tool registry (everything the agent can do)
     registry.go         names, schemas, tiers, strict argument decoding
     read.go             list_resources, get_resource, describe_resource, get_logs, get_events
     metrics.go          get_metrics
+    health.go           get_findings
     mutate.go           scale, rollout_restart, set_labels, set_annotations → Plan
   approval            the human gate: Proposal, Gate.Ask, Grant
   audit               append-only hash-chained JSONL + verification
@@ -32,7 +35,8 @@ internal/
 
 Dependency direction (no cycles): `tui → agent → tools → kube`, with
 `approval` and `audit` as leaves used by `tools`/`agent`/`tui`, `metrics` as a
-leaf used by `kube`, `tools` and `tui`, and `llm` used only by `agent` (and
+leaf used by `kube`, `tools` and `tui`, `health` (which uses `metrics`) used
+the same way, and `llm` used only by `agent` (and
 `config` for presets).
 
 ## The browser
@@ -118,6 +122,56 @@ same thing. Both are thin renderers of one model, fed by one read:
 - **Scope.** Cluster-wide. If pod metrics are refused cluster-wide, the screen
   falls back to the browser's namespace and says so.
 
+## The health screen
+
+`H` answers "is anything broken right now?" — and, as plainly, what was not
+looked at. The copilot's `get_findings` tool gives the model the same report.
+Both render one classification of one observation:
+
+```
+ kube.Cluster.HealthObservation(fallback, maxAge)        internal/health (pure)
+   the four reads, side by side, typed, ≤ 500 rows each,
+   each with its own status and a 10 s bound:
+     pods                         ──────────────┐
+     nodes                                      │
+     deployments, statefulsets, daemonsets      ├─► Observation ─► Observe ─► Report
+     events (type=Warning, last 15 min)         │                              │
+   + the metrics cache (Cluster.Metrics, ≤15 s, │          ┌───────────────────┴──────────────┐
+     no read of its own) ───────────────────────┘          ▼                                  ▼
+                                                     tui/health.go                  tools/health.go
+   cluster-wide; on 403 the fallback namespace,      findings by class, class       Report.Text, capped:
+   saying so · cut at 500 rows, saying so ·          lines, age, filter, opens      findings cut, never
+   one observation kept, reuse ≤ 15 s ◄──────────    detail / logs / events          a class's state
+```
+
+- **Typed reads.** `ListPods`, `ListNodes`, `ListDeployments`,
+  `ListStatefulSets`, `ListDaemonSets` and `ListWarningEvents` return typed
+  objects through the clientset — classification needs conditions, container
+  states and restart counts — with the number of rows cut by the 500-row cap.
+  `list` only; the guard tests are unchanged.
+- **Attempt and classify.** Each read's error is classified exactly as the
+  metrics screen classifies its own (denied, credentials rejected, not served,
+  not answering, timed out, failed). A class is *watched*, *forbidden*,
+  *unavailable* or *not applicable*; one some of whose reads answered is
+  *watched in part* and names what it did not read. Nothing that was not read
+  contributes a finding or an all-clear.
+- **Namespace fallback.** Cluster-wide first; a read refused with 403 is
+  retried for the browser's namespace, and the class says it covers only that
+  namespace and why.
+- **Truncation.** A read cut at 500 rows marks its class as watched in part,
+  "only the first 500 pods were read (N more were not)". It is never clear.
+- **Usage.** From the metrics cache, against `metrics.HeatOf`'s red (90 %) —
+  the same rows the metrics screen draws red. No metrics API: the class is
+  *not applicable*, not "nothing hot".
+- **One observation.** The latest observation is kept with the fallback it
+  was read with. Within 15 s it is handed out again — so the copilot is given
+  what the screen shows, and the screen takes up what the copilot was given —
+  and concurrent callers share one read. No state survives between
+  observations: a condition that clears stops being listed.
+- **Refresh.** While the screen is visible, every `max(refresh_interval,
+  15s)`, never on top of a read still out. The title shows the age of the
+  oldest read behind the report and keeps counting.
+
 ## The copilot
 
 ```
@@ -164,7 +218,16 @@ and trailing data are errors) and the model gets the error text back.
 
 Read tools return text. (`get_metrics` returns the metrics screen's listing
 as text — see above — and an error, not an empty table, when there are no
-readings.) Mutate tools **cannot execute**: the registry can only
+readings. `get_findings` returns the health screen's report — see above: the
+summary, every class's state with what it covers and its thresholds, then the
+findings, newest events first. It classifies nothing itself: it calls
+`health.Observe` on the observation the screen holds, if that is under 15 s
+old. Its optional `namespace` is used only as the fallback for a refused
+cluster-wide read; left out, it is whatever the screen last used. To fit
+`max_result_bytes` it drops findings, counting them per class, and never a
+class's state. The seven read tools are `list_resources`, `get_resource`,
+`describe_resource`, `get_logs`, `get_events`, `get_metrics`,
+`get_findings`.) Mutate tools **cannot execute**: the registry can only
 turn a mutate call into a `tools.Plan` — the target, the exact patch body, the
 before→after lines, reversibility, warnings — and a Plan can only be applied by
 `Plan.Apply(ctx, grant)`, which refuses unless

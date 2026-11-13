@@ -220,8 +220,9 @@ func TestReadToolAutoExecutes(t *testing.T) {
 	if len(h.entries()) != 0 {
 		t.Fatal("a read was audited as a gated action")
 	}
-	// The model was offered exactly the registry's tools.
-	if n := len(h.stub.Requests[0].Tools); n != 10 {
+	// The model was offered exactly the registry's tools: seven read, four
+	// mutate.
+	if n := len(h.stub.Requests[0].Tools); n != 11 {
 		t.Fatalf("model was offered %d tools", n)
 	}
 }
@@ -778,6 +779,34 @@ func TestMissingMetricsReachTheModelAsUnknown(t *testing.T) {
 		if !strings.Contains(res[0].Content, want) {
 			t.Errorf("result lacks %q:\n%s", want, res[0].Content)
 		}
+	}
+}
+
+// 3.3: the model is told to check findings with the tool rather than infer
+// health, and never to call an unread class healthy; and the tool's result —
+// with its unwatched classes — reaches it as an ordinary read.
+func TestSystemPromptExplainsFindings(t *testing.T) {
+	h := newHarness(t, agent.Limits{},
+		llm.Call(call("c1", "get_findings", map[string]any{})),
+		llm.Text("Nothing is crash-looping, but usage was not checked."),
+	)
+	h.run("is anything broken?")
+	sys := h.stub.Requests[0].System
+	for _, want := range []string{
+		"check the current findings with get_findings instead of inferring health from listings",
+		"same findings the user sees on the health screen",
+		"Never describe the cluster as healthy, fine or clear in a respect that was not watched",
+	} {
+		if !strings.Contains(sys, want) {
+			t.Errorf("system prompt lacks %q", want)
+		}
+	}
+	res := h.toolResults(1)
+	if len(res) != 1 || res[0].IsError || !strings.Contains(res[0].Content, "usage: NOT WATCHED (not applicable)") {
+		t.Fatalf("tool result: %+v", res)
+	}
+	if got := h.f.MutatingActions(); len(got) != 0 || len(h.seenProposals()) != 0 {
+		t.Fatalf("reading findings was treated as a change: %v", got)
 	}
 }
 

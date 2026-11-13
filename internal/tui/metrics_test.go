@@ -114,11 +114,15 @@ func (u *ui) fitsTerminal() {
 			u.t.Fatalf("a %d-cell line on a %d-column terminal: %q\n%s", w, u.m.width, l, u.screen())
 		}
 	}
-	if u.m.view != vMetrics || u.m.copilotMax {
+	if (u.m.view != vMetrics && u.m.view != vHealth) || u.m.copilotMax {
 		return
 	}
 	w, h := u.m.browserInner()
-	own := strings.Split(ansi.Strip(u.m.viewMetrics(w, h)), "\n")
+	draw := u.m.viewMetrics
+	if u.m.view == vHealth {
+		draw = u.m.viewHealth
+	}
+	own := strings.Split(ansi.Strip(draw(w, h)), "\n")
 	if len(own) > h {
 		u.t.Fatalf("the metrics screen draws %d lines into a pane of %d:\n%s", len(own), h, strings.Join(own, "\n"))
 	}

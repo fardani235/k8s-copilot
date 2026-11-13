@@ -1,5 +1,38 @@
 # Changelog
 
+## Unreleased — health screen (`openspec/changes/add-cluster-health`)
+
+### Added
+
+- **Health screen** (`H`, from any browser view): what is broken in the
+  cluster right now, grouped by class — workloads (CrashLoopBackOff, more
+  than 5 restarts, images that cannot be pulled, running pods with no ready
+  container for over 5 minutes), nodes (NotReady, memory or disk pressure),
+  rollouts not progressing (Deployments, StatefulSets, DaemonSets; paused and
+  completed ones never), usage at the metrics screen's red, and Warning events
+  of the last 15 minutes grouped with a count. Every class states whether it
+  was watched, watched in part, forbidden, unavailable or not applicable, and
+  why. `enter`/`d`, `l`, `e` open the finding's object; `/` filters; it
+  refreshes itself while visible (at most every 15 s) and shows the age of
+  its reading.
+- **`get_findings` copilot tool** (read tier): the same report as text, with
+  every class's state, capped by dropping findings — counted — never a class
+  state. The system prompt tells the model to check findings with it instead
+  of inferring health, and never to call an unwatched class healthy.
+- **`internal/health`**: one pure model (`Observation` → `Observe` →
+  `Report`) that both the screen and the tool render.
+- **`kube`**: typed, read-only, 500-row-capped listings of pods, nodes,
+  Deployments, StatefulSets, DaemonSets and Warning events, each with its own
+  status and the rows it cut; cluster-wide first, the browser's namespace when
+  refused; one observation shared between the screen and the copilot; usage
+  from the existing metrics cache, never a read of its own.
+- The browser's footer and help list `H`.
+
+### Unchanged on purpose
+
+No new configuration, permission, dependency or write path: `internal/guard`
+passes untouched, `go.mod` is unchanged.
+
 ## Unreleased — metrics screen (`openspec/changes/add-metrics-dashboard`)
 
 ### Added

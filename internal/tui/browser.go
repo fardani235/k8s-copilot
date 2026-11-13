@@ -159,8 +159,15 @@ func (m *Model) onFilterKey(msg tea.KeyMsg) tea.Cmd {
 }
 
 // setFilter applies the filter input to whichever listing is on screen: the
-// resource listing, or the metrics screen's.
+// resource listing, the metrics screen's, or the health screen's.
 func (m *Model) setFilter(v string) {
+	if m.view == vHealth {
+		if v != m.health.filter {
+			m.health.filter = v
+			m.rebuildHealth(m.health.selectedKey())
+		}
+		return
+	}
 	if m.view == vMetrics {
 		if v != m.metrics.filter {
 			m.metrics.filter = v

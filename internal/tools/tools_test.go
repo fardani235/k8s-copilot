@@ -54,17 +54,37 @@ func grant(t *testing.T, p *tools.Plan, action approval.Action) *approval.Grant 
 	return gr
 }
 
-// 5.1: the registry is exactly the v1 set, correctly tiered.
+// 5.1: the registry is exactly the v1 set, correctly tiered: seven read
+// tools, four mutate tools.
 func TestRegistryContents(t *testing.T) {
 	r := registry(kubetest.New())
 	want := map[string]tools.Tier{
 		"list_resources": tools.Read, "get_resource": tools.Read, "describe_resource": tools.Read,
-		"get_logs": tools.Read, "get_events": tools.Read, "get_metrics": tools.Read,
+		"get_logs": tools.Read, "get_events": tools.Read, "get_metrics": tools.Read, "get_findings": tools.Read,
 		"scale": tools.Mutate, "rollout_restart": tools.Mutate, "set_labels": tools.Mutate, "set_annotations": tools.Mutate,
 	}
 	specs := r.Specs()
 	if len(specs) != len(want) {
 		t.Fatalf("registry has %d tools, want exactly %d", len(specs), len(want))
+	}
+	reads, mutates := 0, 0
+	for _, s := range specs {
+		if s.Tier == tools.Read {
+			reads++
+		} else {
+			mutates++
+		}
+	}
+	if reads != 7 || mutates != 4 {
+		t.Fatalf("%d read and %d mutate tools, want 7 and 4", reads, mutates)
+	}
+	// The refusal of an unknown tool lists every tool there is, the read set
+	// included.
+	_, err := r.Read(ctx, "frobnicate", nil)
+	for name := range want {
+		if err == nil || !strings.Contains(err.Error(), name) {
+			t.Errorf("the unknown-tool refusal does not list %s: %v", name, err)
+		}
 	}
 	for _, s := range specs {
 		tier, ok := want[s.Name]

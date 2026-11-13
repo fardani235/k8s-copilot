@@ -366,6 +366,149 @@ level; a 429 costs client-go's own retries before it is reported; the
 handling of running init containers was tested with constructed samples
 only.
 
+## Cluster health (`openspec/changes/add-cluster-health`)
+
+The full reasoning is in that change's `design.md` (D1–D9). This is the
+record of what was decided, and of the choices the design left open.
+
+### K-39 — One pure model, `internal/health`, rendered twice
+`health.Observe(*Observation) *Report` classifies typed pods, nodes,
+Deployments, StatefulSets, DaemonSets, Warning events and the shared metrics
+snapshot, with the outcome of each read, into findings and per-class states.
+Every sentence the user or the model reads — class lines, the summary, "not
+covered" — is written there once. The screen draws the `Report`;
+`get_findings` prints `Report.Text`. *Rejected:* classifying in the TUI and
+again in the tool (guaranteed drift, in the one place where "the copilot said
+the cluster is fine" is the dangerous sentence); classifying inside
+`internal/kube` (interpretation in the transport package, untestable without a
+cluster).
+
+### K-40 — Availability by attempting the read
+A class's state comes from what its reads answered, classified with the
+metrics screen's vocabulary (K-28): `watched`, `forbidden` (403, 401),
+`unavailable` (404 for a core type, 5xx, timeout, anything else), `not
+applicable` (no metrics API, or no metrics in the observation). A class some
+of whose reads answered is *watched in part* and names what it could not read.
+The zero `health.Read` is "never read", not "read, found nothing". *Rejected:*
+a `SelfSubjectAccessReview` preflight — a prediction layered on an answer, and
+a `create` request in a tool that only reads.
+
+### K-41 — No state between observations
+`Observe` has no `previous` argument and nothing is retained between
+refreshes; a condition that clears simply stops being listed. *Rejected:*
+dedup and transition tracking, which existed only for the dropped tray
+notifier and would invite history in.
+
+### K-42 — Stated thresholds, and the ones the design left open
+Constants in `internal/health`, shown in each class's "covers" text on the
+screen and in the tool's result; no configuration. *Rejected:* making them
+configurable (an operator should not have to tune a screen to trust it).
+Values chosen here, since the design did not fix them:
+
+- **Restarting repeatedly**: more than 5 restarts (`RestartThreshold`),
+  whatever the current state. CrashLoopBackOff is a finding at any count.
+- **Not ready**: a *running* pod none of whose containers is ready for over
+  5 minutes (`NotReadyGrace`), measured from the pod's ContainersReady/Ready
+  transition. A pod already reported for a crash loop, a pull failure or
+  restarts is not reported again as not ready. Shorter is a pod starting up.
+- **Stuck waiting**: a container waiting for any reason other than
+  ContainerCreating / PodInitializing (CreateContainerConfigError,
+  RunContainerError, …) for over the same 5 minutes. Added after the review
+  (K-45).
+- **Warning events**: the last 15 minutes (`EventWindow`), grouped by object,
+  reason and message, at most 50 groups shown with "showing N of M".
+- **Usage**: the metrics screen's red, `metrics.HeatOf(pct) == High` (90 %)
+  of a node's allocatable or a container's limit — the same function, not a
+  copy of its number.
+- **StatefulSets and DaemonSets** have no progress deadline, so "not
+  progressing" is: fewer ready than desired *and* a pod they control not ready
+  for over 5 minutes. Updates held back by `OnDelete` or a partition are
+  deliberate and not reported. Without the pod list this cannot be judged, and
+  the rollouts class says so rather than calling them fine.
+- **Deployments**: `Progressing=False` (ProgressDeadlineExceeded) or
+  `ReplicaFailure=True`; paused or complete ones never.
+
+### K-43 — Typed, capped reads in `internal/kube`; cluster-wide, then the browser's namespace
+Pods, nodes, Deployments, StatefulSets, DaemonSets and Warning events are
+listed through the typed clientset, one `list` each, at most 500 rows
+(`kube.DefaultListLimit`), each with a 10 s bound and its own status. A read
+refused with 403 is retried for the browser's namespace and its class says so.
+A read cut at the cap carries the number of rows cut (from the server's
+remaining count when it gives one) and its class is *watched in part*, never
+clear — the one place where the existing cap could otherwise produce a false
+all-clear. Usage comes from `Cluster.Metrics` at its 15 s reuse, never a read
+of its own. *Rejected:* the generic (unstructured) listing path, which exists
+to display, not to classify; paging past 500 rows, which the design did not
+ask for and which would make a refresh's cost unbounded on large clusters —
+the cut is stated instead (see limits below); the events.k8s.io API (the core
+events the browser already reads are the same objects).
+
+*Open choices made here:* the observation is kept in **one slot** with the
+fallback namespace it was read with, and handed out again within 15 s
+(`kube.HealthFreshFor`) when that fallback fits — it fits if it is the same
+namespace, if no cluster-wide read was refused (the fallback made no
+difference), or if the caller asks for whatever is latest
+(`kube.AnyFallback`, used by `get_findings` when the model names no
+namespace). Each class's read has its own 10 s bound and they run side by
+side, so a slow type costs at most 10 s and the report is published when
+every read has answered or hit its bound; the screen meanwhile says it is
+reading (the design's "still reading, then timed out" per class is this, at
+the granularity of one report).
+
+### K-44 — `get_findings` prints the same report, and cuts findings, never states
+The tool calls `health.Observe` on the observation behind the screen (reused
+up to 15 s) and prints `Report.Text`: the age, the summary, every class's line
+with what it covers and its thresholds, the "not covered" list, then the
+findings. When the result would exceed `max_result_bytes` it drops findings
+from the end and says how many of how many, and how many of each class, were
+left out; the class states are never cut. *Why:* the class states are what
+stops "nothing is wrong" being read off an empty list; findings can be
+summarised, the absence of a class cannot. *Rejected:* the generic byte cap
+(`textutil.Truncate`), which would cut the report wherever the limit fell; an
+error result when a class is not watched (as `get_metrics` does for a missing
+source), because the other classes' findings are still the answer — the
+unwatched class is a stated limit of it. The tool takes one optional
+argument, `namespace`, the fallback for a refused cluster-wide read; left out,
+it is whatever the screen last used, else the context's default namespace.
+
+### K-45 — Independent review before hand-over
+As with K-24 and K-38, the change was handed to a separate reviewer with the
+code, the spec and four promises (honesty, consistency, read-only,
+robustness) — not the design rationale — and asked to break it with
+reproductions, on fakes only.
+
+**What held.** Every unread state (forbidden, credentials rejected, timed
+out, never attempted, caller gave up, metrics absent or held) produced no
+findings and was never called clear; cut and namespace-limited reads always
+made their class incomplete; only `list` requests; `-race` clean across the
+seven packages; a stuck read abandoned at its bound even when the transport
+ignores the deadline; hostile names sanitised and the screen inside its pane
+at every size; classification as specified.
+
+**What did not, and was fixed** (each with a test that fails without the fix
+— checked by reverting it):
+
+| Finding | Fix |
+|---|---|
+| Pods readable in one namespace only, StatefulSets cluster-wide: rollouts said "watched, no findings" although stalls elsewhere were never judged | A stated limit, "StatefulSet and DaemonSet stalls judged in namespace X only"; the class is not clear. `health.TestRolloutsWithPodsOfOneNamespaceAreNotClear` |
+| Metrics API answering with no readings (metrics-server starting, or unable to reach the kubelets): usage — and the whole report — "No findings. Every class was watched" | Nodes and running pods without a reading are counted and stated; none at all is *unavailable*. `health.TestUsageWithoutReadingsIsNotClear` |
+| Fitting the tool's text was quadratic: 5000 findings took 13 s (1m48 under `-race`) | Prefix sums and a binary search. `health.TestTextCutIsNotQuadratic` |
+| On the health screen the focus's namespace was the selected finding's, so the model asked for a different fallback than the screen's and the one-slot cache thrashed | The focus's namespace is the browser's (the screen's fallback); the finding's namespace is stated with it; the tool's argument says to give it. `tui.TestHealthFocusText`, `kube.TestAnyFallbackTakesTheScreensObservation` |
+| A budget smaller than the class states alone was exceeded | A compact head (each class line shortened, "covers" left out), every state kept. `health.TestTextStaysWithinBudgetWithLongReasons` |
+| A container stuck in CreateContainerConfigError / RunContainerError, and a node with no Ready condition, were clear | Findings: any waiting reason but ContainerCreating/PodInitializing past the 5-minute grace; `NoReadyCondition`. `health.TestStuckWaitingAndMissingReadyAreFindings` |
+| The focus did not say how old the reading was; a chain of reads (one out, then one's own) could outlast the screen's wait | The focus states the age; a caller waits for at most one read in flight and then makes at most one of its own, within `kube.HealthObservationBound`, which the screen's wait covers |
+
+**Left as documented limits**: StatefulSets and DaemonSets whose pods were
+never created, and pods stuck in ContainerCreating, are not detected (both now
+named in "Not covered"); reads stop at 500 rows per type, stated, with no
+paging; with nothing cached and no namespace given, `get_findings` falls back
+to the kubeconfig context's namespace rather than the browser's; a
+crash-looping pod is reported under workloads and events both; a local clock
+behind the cluster's makes an old reading look new, as on the metrics screen;
+the interactive checks against a live cluster (tasks 5.3, 5.4) were not run —
+creating workloads in the cluster was not permitted to this session — and are
+listed in docs/testing.md for a human.
+
 ## Not done, on purpose
 
 - No metrics history, trends, graphs or alerts; no source other than
