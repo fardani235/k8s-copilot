@@ -77,6 +77,7 @@ prints what is in effect (never the key).
 | `r` | refresh now (it also refreshes every 5s) |
 | `esc` | back |
 | `M` | metrics: how loaded the cluster is right now ([below](#metrics)) |
+| `H` | health: what is broken right now ([below](#health)) |
 | `A` | audit trail |
 | `?` | help |
 | `q`, `ctrl+c` | quit |
@@ -143,6 +144,68 @@ screen if it is open — so when you ask why something is slow it can check
 whether it is actually CPU-saturated or short of memory, and what it tells you
 matches what you see. There is no history: this is a picture of now.
 
+### Health
+
+`H`, from anywhere in the browser, answers "is anything broken right now?" —
+and says just as plainly what it did not look at:
+
+```
+ health · 2 findings                                              read 4s ago
+ workloads watched · 1
+ nodes     watched
+ rollouts  watched · 1
+ usage     not applicable — Metrics are not available on this cluster: …
+ events    watched
+ WRK Pod shop/web-1 [app]  CrashLoopBackOff  3m
+ ROL Deployment shop/api  ProgressDeadlineExceeded  8m
+
+ for 3m · container app is crash-looping: restarted 7 times; last exit: Error, exit code 1
+```
+
+Five classes, each with the line that decides it:
+
+- **workloads** — a container in CrashLoopBackOff or restarted more than 5
+  times; an image that cannot be pulled; a container stuck waiting
+  (CreateContainerConfigError, RunContainerError, …) or a running pod none of
+  whose containers has been ready, for over 5 minutes;
+- **nodes** — NotReady or no Ready condition, memory pressure, disk pressure;
+- **rollouts** — a Deployment that reports it is not progressing; a
+  StatefulSet or DaemonSet short of ready replicas with a pod not ready for
+  over 5 minutes (paused and completed rollouts are never reported);
+- **usage** — a node or container at the metrics screen's red, 90% of its
+  allocatable or its limit;
+- **events** — Warning events of the last 15 minutes, repeats grouped with a
+  count.
+
+| Key | |
+|---|---|
+| `↑ ↓ j k` | move |
+| `enter`, `d` | detail of the finding's object |
+| `l` `e` | logs (pods), events of the finding's object — `esc` comes back to the same finding |
+| `/` | filter by object, namespace, class or reason |
+| `r` | read again now (it also re-reads by itself, at most every 15s, only while showing) |
+| `esc` | clear the filter, then back to where you were |
+
+**A class it could not read is not a class with no problems.** Each class
+says whether it was *watched*, *watched in part* (only your namespace, because
+the cluster-wide read was refused; or only the first 500 objects), *forbidden*,
+*unavailable* or *not applicable* (no metrics API) — and why. Only when every
+class was watched across the whole cluster does it say "No findings". It is
+read-only, needs no extra permission and installs nothing.
+
+**What it does not cover**: failed Jobs or CronJobs, Pending pods that cannot
+be scheduled or are stuck in ContainerCreating, StatefulSets or DaemonSets
+whose pods were never created, PersistentVolumeClaims,
+HorizontalPodAutoscalers, PodDisruptionBudgets, Service endpoints. A crash-looping pod also shows up
+under events; the two are not merged. There is no history and no
+notification: it is a picture of now, with its age on show.
+
+The copilot reads the same report (`get_findings`) — the one on the screen if
+it is open — so "what is broken?" gets the findings you see, and it is told
+never to call a class healthy that was not watched.
+
+### Changes
+
 **When it proposes a change** a dialog takes over the screen:
 
 ```
@@ -180,7 +243,7 @@ cluster, not written by the model.
 
 | | |
 |---|---|
-| **Reads, freely** | list any resource type, get, describe, pod logs, events, current CPU and memory usage |
+| **Reads, freely** | list any resource type, get, describe, pod logs, events, current CPU and memory usage, current health findings |
 | **Proposes, and waits** | `scale` (Deployment/StatefulSet/ReplicaSet), `rollout_restart` (Deployment/StatefulSet/DaemonSet), `set_labels`, `set_annotations` |
 | **Cannot, at all** | delete, create, apply or patch manifests, change images, exec, port-forward, cordon/drain — there is no code path for these |
 
@@ -215,6 +278,7 @@ change.
 - [CHANGELOG.md](CHANGELOG.md)
 - [openspec/changes/archive/2026-10-07-add-k2stui/](openspec/changes/archive/2026-10-07-add-k2stui/) — the requirements this implements
 - [openspec/changes/add-metrics-dashboard/](openspec/changes/add-metrics-dashboard/) — the metrics screen: proposal, design (with the alternatives considered) and requirements
+- [openspec/changes/add-cluster-health/](openspec/changes/add-cluster-health/) — the health screen and `get_findings`
 
 ## Status
 
@@ -228,3 +292,9 @@ The metrics screen (`add-metrics-dashboard`) is implemented and tested, and its
 "no metrics API" state has been checked against a real API server and in a real
 terminal. It has **not** yet been watched against a real metrics-server — see
 the same section.
+
+The health screen (`add-cluster-health`) is implemented and tested, and its
+reads and `get_findings` have been run read-only against a real API server
+with metrics-server. The interactive checks — forcing a crash loop and a
+stalled rollout, a namespace-only credential, a container at its limit — have
+**not** yet been done by hand; see the same section.

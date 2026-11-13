@@ -136,6 +136,63 @@ metrics-server), on 2026-10-09:
 
 That run is also what found the copilot pane overflow recorded in K-37.
 
+## The health screen (`add-cluster-health`)
+
+| Property | Verified by |
+|---|---|
+| Every class state reads differently; "watched, no findings" is never "not watched" | `health.TestStatesAreDistinct` |
+| Workload, node, rollout, event and usage classification, with the stated thresholds | `health.TestWorkloadFindings`, `TestNodeFindings`, `TestRolloutFindings`, `TestWarningEventWindowAndGrouping`, `TestUsageUsesTheSharedHeatThreshold` |
+| No metrics is not "nothing hot"; a held snapshot is not current | `health.TestNoMetricsIsNotClear` |
+| An unread, refused or partly read class contributes nothing and is never clear | `health.TestUnreadClassIsNeverClear`, `tui.TestHealthShowsWhatIsNotWatched` |
+| A read cut at 500 rows, or narrowed to a namespace, says so and is not clear | `health.TestTruncatedReadSaysSo`, `kube.TestTruncationIsReported`, `kube.TestHealthListingsFallBackToNamespace` |
+| Names and messages cannot drive the terminal or forge a line for the model | `health.TestFindingTextIsSanitizedAndBounded`, `tui.TestHealthFitsNarrowPane` |
+| Typed, `list`-only reads, each with its own status | `kube.TestTypedHealthListings`, `kube.TestWarningEventsWindowAndCap`, `guard` (unchanged) |
+| Usage comes from the metrics cache, never a second read | `kube.TestObservationReusesMetricsSnapshot` |
+| One observation for concurrent callers; a caller that gives up is not told "clear" | `kube.TestHealthObservationSharesOneRead`, `kube.TestHealthCallerCanStopWaiting` |
+| A slow read is abandoned after its bound, with a reason, without holding the others | `kube.TestSlowHealthReadIsAbandonedWithAReason`, `tui.TestHealthSlowReadDoesNotBlock` |
+| The tool prints the model's report, cuts findings and never class states | `tools.TestGetFindings`, `tools.TestGetFindingsAllClear`, `tools.TestFindingsCapKeepsClassStates`, `health.TestTextCutKeepsClassStates` |
+| Seven read tools, four mutate; the refusal lists them | `tools.TestRegistryContents` |
+| The model is told to use it and not to call an unread class healthy | `agent.TestSystemPromptExplainsFindings` |
+| `H` opens it from any view; leaving restores namespace, type, selection, filter | `tui.TestHealthKeyOpensAndReturnsWithBrowserState` |
+| Filter over object/namespace/class/reason; the cursor follows its finding | `tui.TestHealthFilterAndStickySelection` |
+| Detail, logs, events of a finding, and back to the same finding | `tui.TestHealthOpensSubjectViews` |
+| Refresh only while visible, at `max(refresh_interval, 15s)`, never overlapping | `tui.TestHealthRefreshesOnlyWhileVisible` |
+| The focus names the screen, its classes and the finding; restored on leaving | `tui.TestHealthFocusText` |
+| The copilot's reading is what the screen shows, without a further read | `tui.TestHealthShowsWhatTheCopilotWasGiven` |
+| Inside the pane at every size; class and object kept; unwatched classes first when narrow | `tui.TestHealthFitsNarrowPane` |
+| Pods of one namespace only: rollouts not clear (review) | `health.TestRolloutsWithPodsOfOneNamespaceAreNotClear` |
+| A metrics API with no readings is not "nothing hot" (review) | `health.TestUsageWithoutReadingsIsNotClear` |
+| The tool's cut is fast and within budget, states kept (review) | `health.TestTextCutIsNotQuadratic`, `TestTextStaysWithinBudgetWithLongReasons` |
+| Stuck waiting containers, nodes with no Ready condition (review) | `health.TestStuckWaitingAndMissingReadyAreFindings` |
+| The copilot is handed the screen's observation, and the focus names the screen's fallback (review) | `kube.TestAnyFallbackTakesTheScreensObservation`, `tui.TestHealthFocusText` |
+| The help and the README's sample match the screen | `tui.TestHealthHelpAndReadmeMatchTheScreen` |
+
+**The tests were checked against themselves.** Each honesty rule was
+reverted in turn and the suite run (`health`, `kube`, `tools`, `tui`,
+`agent`): an unread class rendered clear (`Class.Clear` ignoring the state —
+6 tests failed); a class with no answering read made *watched* (5); a
+truncated read rendered clear (3); the truncation dropped on its way out of
+`kube` (1); absent metrics rendered as a watched, quiet usage class (6+); no
+snapshot rendered as watched (2); the tool dropping class states when it cuts
+(2); the tool using the generic byte cap (1). One mutation survived alone:
+removing `Observe`'s backstop that discards an unwatched class's findings,
+because every classifier already returns nothing for a read that did not
+answer — removing the backstop together with one classifier's own guard is
+caught (`health.TestUnreadClassIsNeverClear`).
+
+**Against a real API server** (this box's minikube, Kubernetes v1.35.1, with
+metrics-server running), on 2026-11-13:
+`K8S_COPILOT_LIVE=1 go test ./internal/tools -run LiveFindings -v` — all six
+typed reads answered cluster-wide (24 pods, 1 node, 12 Deployments, 3
+StatefulSets, 1 DaemonSet, 2 Warning events — the server honoured the
+`type=Warning` field selector), the usage class was *watched* from the real
+metrics API, and `get_findings` reported metrics-server's own readiness-probe
+warnings from its start-up, grouped and newest first. `list` requests only.
+The interactive checks (tasks 5.3, 5.4 — forcing a crash loop and a stalled
+rollout, a namespace-only credential, a container at its memory limit, and
+removing metrics-server) change the cluster and are left for a human: see
+items 9 and 10 below.
+
 ## Independent review
 
 Before hand-over the approval path was reviewed adversarially by a separate
@@ -201,6 +258,27 @@ a model API key being spent, and a change being approved on a cluster.
 8. **Ask the copilot about load** (metrics change, task 6.6): with the metrics
    screen open, ask why a workload is slow. Expected: it calls `get_metrics`,
    and the figures it quotes are the ones on the screen.
+
+9. **The health screen against minikube** (health change, task 5.3). In a
+   throwaway namespace, force a pod into CrashLoopBackOff
+   (`kubectl run crash --image=busybox -- sh -c 'exit 1'`) and a Deployment
+   into a stalled rollout (`kubectl create deployment stall --image=nginx`,
+   `kubectl patch deploy stall -p '{"spec":{"progressDeadlineSeconds":30}}'`,
+   `kubectl set image deploy/stall nginx=nginx:does-not-exist`, wait a
+   minute). Press `H`: expect a workloads and a rollouts finding (plus the
+   pull failure and Warning events). Open logs and detail from each, filter,
+   leave and return; the browser's namespace, type, selection and filter
+   should be as they were. Then with a credential bound to one namespace only
+   (a ServiceAccount with a namespaced Role, via its own kubeconfig context),
+   confirm the affected classes say "namespace … only, because Permission
+   denied … across all namespaces".
+10. **Health usage against a metrics-server** (health change, task 5.4):
+   `minikube addons enable metrics-server`; drive a container to its memory
+   limit (`kubectl run hog --image=polinux/stress --limits=memory=64Mi --
+   stress --vm 1 --vm-bytes 60M`); confirm one usage finding whose figure is
+   the red row on the metrics screen. Then disable the addon and confirm the
+   usage class says *not applicable* (or *unavailable* while it winds down) —
+   never "no findings".
 
 A throwaway target for 4–6:
 

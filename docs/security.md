@@ -108,6 +108,11 @@ provider you configured. To limit that:
   together with their CPU and memory figures, requests, limits and restart
   counts — nothing from inside a workload. It is the same kind of data
   `list_resources` already sends.
+- `get_findings` sends the names of the pods, nodes and workloads with a
+  problem, their container names and images, the cluster's own reason and
+  message for each condition, and the text of recent Warning events — the
+  same kind of data `describe_resource` and `get_events` already send. Every
+  string is sanitised and bounded in length.
 - **Not** covered: secrets that appear in pod logs, in plain `env` values in a
   pod spec, or in ConfigMaps. If your cluster has those, they can reach the
   provider when the agent reads them. Use a provider you are allowed to send

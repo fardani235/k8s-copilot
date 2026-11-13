@@ -46,6 +46,18 @@ The metrics screen (`M`) has no settings of its own. It follows
 cluster's metrics source has a new sample only every 15 s or so — and with
 `refresh_interval: off` it reads when opened and when you press `r`.
 
+The health screen (`H`) has no settings either. It follows
+`refresh_interval` with a floor of 15 s (it makes more requests than the
+metrics screen), reads only while it is visible, and with
+`refresh_interval: off` reads when opened and when you press `r`. Its
+thresholds (more than 5 restarts, 5 minutes not ready, Warning events of the
+last 15 minutes, the metrics screen's 90 %) are fixed and shown on the screen.
+
+`max_result_bytes` also bounds the copilot's `get_metrics` and `get_findings`
+results. Both shorten themselves to fit rather than being cut off: metrics
+drop rows, findings drop findings — counted, per class — and never a class's
+state (watched, forbidden, unavailable, not applicable).
+
 API keys cannot be put in this file: a file containing `api_key` is rejected
 with a message saying so.
 

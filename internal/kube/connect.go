@@ -166,6 +166,7 @@ type Cluster struct {
 
 	typeCache typeCache
 	metrics   metricsCache
+	health    healthCache
 }
 
 // Connect resolves the kubeconfig, builds the clients, and probes the server

@@ -277,7 +277,8 @@ BROWSER
   /                         filter the listing
   r                         refresh now
   esc                       back
-  M                         metrics: how loaded the cluster is right now
+  M                         metrics: how loaded the cluster is now
+  H                         health: what is broken right now
   A                         audit trail
   q, ctrl+c                 quit
 
@@ -297,6 +298,27 @@ METRICS (M)
   showing an empty table.
   %CPU/R %MEM/R are usage as a share of requests, %CPU/L %MEM/L of limits.
   Rows turn amber at 75% of a hard bound (allocatable, limit), red at 90%.
+
+HEALTH (H)
+  What is wrong in the cluster now, read-only, grouped by class:
+  workloads (CrashLoopBackOff, more than 5 restarts, images that cannot be
+  pulled, containers stuck waiting or running pods with no ready container
+  for over 5m), nodes (NotReady or no Ready condition, memory or disk
+  pressure), rollouts not progressing, usage at the metrics
+  screen's red (90% of a limit or of allocatable), Warning events of the last
+  15m. Each class says whether it was watched, watched in part (a namespace
+  only, or the first 500 objects), forbidden, unavailable or not applicable.
+  A class that was not watched was not checked: never read it as healthy.
+  It refreshes itself while it is showing, and says how old the reading is.
+  ↑ ↓ j k                   move
+  enter, d                  detail of the finding's object
+  l  e                      logs (pods), events of the finding's object
+  /                         filter by object, namespace, class or reason
+  r                         read again now
+  esc                       clear the filter, then back
+  Not covered: failed Jobs/CronJobs, Pending pods that cannot be scheduled
+  or are stuck in ContainerCreating, StatefulSets/DaemonSets whose pods were
+  never created, PVCs, HPAs, PodDisruptionBudgets, Service endpoints.
 
 COPILOT
   c                         show / hide the pane

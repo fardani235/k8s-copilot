@@ -86,7 +86,7 @@ func (u *ui) pump(cmd tea.Cmd) {
 	default:
 		// Only our own messages drive state; ignore library housekeeping.
 		switch msg.(type) {
-		case typesMsg, nsMsg, listMsg, subjectMsg, eventsMsg, auditMsg, logMsg, agentEventMsg, proposalMsg, metricsMsg:
+		case typesMsg, nsMsg, listMsg, subjectMsg, eventsMsg, auditMsg, logMsg, agentEventMsg, proposalMsg, metricsMsg, healthMsg:
 			u.send(msg)
 		}
 	}

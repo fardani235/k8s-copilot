@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fardani235/k8s-copilot/internal/health"
 	"github.com/fardani235/k8s-copilot/internal/kube"
 	"github.com/fardani235/k8s-copilot/internal/metrics"
 	"github.com/fardani235/k8s-copilot/internal/tools"
@@ -206,4 +207,47 @@ func TestLiveMetricsReadOnly(t *testing.T) {
 			t.Error("cluster totals claim a reading")
 		}
 	}
+}
+
+// TestLiveFindingsReadOnly reads the health observation from the current
+// kubeconfig context and prints what get_findings would tell the model. It
+// sends `list` requests only; it does not assert that the cluster is healthy
+// — only that every class has a state and the report is the model's.
+//
+//	K8S_COPILOT_LIVE=1 go test ./internal/tools -run LiveFindings -v
+func TestLiveFindingsReadOnly(t *testing.T) {
+	if os.Getenv("K8S_COPILOT_LIVE") != "1" {
+		t.Skip("set K8S_COPILOT_LIVE=1 to run against the current kubeconfig context (read-only)")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	c, err := kube.Connect(ctx, kube.ConnectOptions{UserAgent: "k8s-copilot-live-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	obs := c.HealthObservation(ctx, c.Info.Namespace, 0)
+	for name, r := range map[string]health.Read{"pods": obs.PodsRead, "nodes": obs.NodesRead, "deployments": obs.DeploymentsRead,
+		"statefulsets": obs.StatefulSetsRead, "daemonsets": obs.DaemonSetsRead, "events": obs.EventsRead} {
+		t.Logf("%-12s done=%v state=%v scope=%q truncated=%v cut=%d reason=%q", name, r.Done, r.Status.State, r.Status.Scope, r.Truncated, r.Cut, r.Status.Reason)
+		if !r.Done {
+			t.Errorf("%s was not attempted", name)
+		}
+	}
+	t.Logf("read: %d pods, %d nodes, %d deployments, %d statefulsets, %d daemonsets, %d warning events; metrics node=%v pod=%v",
+		len(obs.Pods), len(obs.Nodes), len(obs.Deployments), len(obs.StatefulSets), len(obs.DaemonSets), len(obs.Events),
+		obs.Metrics.Sources.NodeMetrics.State, obs.Metrics.Sources.PodMetrics.State)
+	rep := health.Observe(obs)
+	if len(rep.Classes) != len(health.ClassOrder) {
+		t.Fatalf("%d classes", len(rep.Classes))
+	}
+	out, err := tools.NewRegistry(c, tools.DefaultOptions()).Read(ctx, "get_findings", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range rep.Classes {
+		if !strings.Contains(out, string(rep.Classes[i].ID)+": ") {
+			t.Errorf("the tool's result does not state %s", rep.Classes[i].ID)
+		}
+	}
+	t.Log("\n" + out)
 }
