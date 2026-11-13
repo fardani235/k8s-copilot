@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,7 +13,14 @@ import (
 	"testing"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime"
+	clienttesting "k8s.io/client-go/testing"
+
+	"github.com/fardani235/k8s-copilot/internal/agent"
 	"github.com/fardani235/k8s-copilot/internal/audit"
+	"github.com/fardani235/k8s-copilot/internal/kube"
+	"github.com/fardani235/k8s-copilot/internal/kube/kubetest"
 )
 
 func exec(t *testing.T, env map[string]string, args ...string) (code int, stdout, stderr string) {
@@ -138,5 +147,76 @@ func TestVersionAndConfig(t *testing.T) {
 	code, out, _ = exec(t, map[string]string{"ANTHROPIC_API_KEY": "sk-secret"}, "config", "--model", "m1")
 	if code != 0 || !strings.Contains(out, "ANTHROPIC_API_KEY (set)") || !strings.Contains(out, "m1") || strings.Contains(out, "sk-secret") {
 		t.Fatalf("%d %q", code, out)
+	}
+}
+
+// Task 2.1/2.2: the copilot's snapshot is the health report from the shared
+// observation, within the snapshot budget, read with `list` only; a caller
+// that stopped waiting gets an error, not a report of abandoned reads.
+func TestHealthSnapshotIsTheScreensReport(t *testing.T) {
+	f := kubetest.New(kubetest.Pod("shop", "web-1"))
+	snap := healthSnapshot(f.Cluster)
+	text, err := snap(context.Background(), agent.Focus{Namespace: "shop"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(text, "Cluster health, read") || !strings.Contains(text, "same findings the user sees on the health screen") {
+		t.Fatalf("not the health report:\n%s", text)
+	}
+	if len(text) > agent.HealthSnapshotBytes {
+		t.Fatalf("snapshot is %d bytes, over %d", len(text), agent.HealthSnapshotBytes)
+	}
+	if got := f.MutatingActions(); len(got) != 0 {
+		t.Fatalf("the snapshot changed something: %v", got)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := snap(ctx, agent.Focus{Namespace: "shop"}); err == nil {
+		t.Fatal("a cancelled snapshot was handed on as a report")
+	}
+}
+
+// Review finding: the snapshot asks for the observation with the health
+// screen's fallback — the browser's namespace — not the kube context's.
+func TestSnapshotFallbackIsTheBrowsersNamespace(t *testing.T) {
+	cases := []struct {
+		focus agent.Focus
+		want  string
+	}{
+		{agent.Focus{Namespace: "shop"}, "shop"},
+		{agent.Focus{AllNamespaces: true}, kube.AllNamespaces},
+		{agent.Focus{}, kube.AnyFallback},
+		{agent.Focus{Namespace: "(not applicable: cluster-scoped type)"}, kube.AnyFallback},
+	}
+	for _, c := range cases {
+		if got := snapshotFallback(c.focus); got != c.want {
+			t.Errorf("%+v: fallback %q, want %q", c.focus, got, c.want)
+		}
+	}
+}
+
+// Review finding, end to end: with cluster-wide reads refused and a cold
+// cache, the snapshot reads the browser's namespace — not the kube context's
+// default — and the screen's next read is that same observation.
+func TestSnapshotReadsTheScreensNamespace(t *testing.T) {
+	f := kubetest.New(kubetest.Pod("shop", "web-1"), kubetest.Pod("default", "x"))
+	f.Clientset.PrependReactor("list", "*", func(a clienttesting.Action) (bool, runtime.Object, error) {
+		if a.GetResource().Resource == "nodes" || a.GetNamespace() == "shop" {
+			return false, nil, nil
+		}
+		return true, nil, apierrors.NewForbidden(a.GetResource().GroupResource(), "", errors.New("no"))
+	})
+	text, err := healthSnapshot(f.Cluster)(context.Background(), agent.Focus{Namespace: "shop"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(text, "namespace shop only") || strings.Contains(text, "namespace default") {
+		t.Fatalf("the snapshot did not fall back to the browser's namespace:\n%s", text)
+	}
+	before := len(f.Clientset.Actions())
+	f.HealthObservation(context.Background(), "shop", kube.HealthFreshFor)
+	if after := len(f.Clientset.Actions()); after != before {
+		t.Fatalf("the screen read again (%d more requests) instead of taking the snapshot's observation", after-before)
 	}
 }

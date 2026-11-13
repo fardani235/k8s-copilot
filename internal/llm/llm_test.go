@@ -237,3 +237,48 @@ func TestStubIsDeterministic(t *testing.T) {
 		t.Fatal("an exhausted script must fail, not invent a reply")
 	}
 }
+
+// The per-request system context follows the cacheable system prompt: on
+// Anthropic as a second block after the cache breakpoint, elsewhere at the
+// end of the one system message.
+func TestTurnContextFollowsTheCachedPrefix(t *testing.T) {
+	req := conversation()
+	req.TurnContext = "\n\n[cluster health snapshot]\nall clear"
+
+	ant := serve(t, 200, `{"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{}}`,
+		func(_ *http.Request, body map[string]any) {
+			sys := body["system"].([]any)
+			if len(sys) != 2 {
+				t.Fatalf("anthropic: %d system blocks, want 2: %v", len(sys), sys)
+			}
+			first, second := sys[0].(map[string]any), sys[1].(map[string]any)
+			if first["text"] != "be brief" || first["cache_control"] == nil {
+				t.Errorf("anthropic: first block %v", first)
+			}
+			if second["text"] != req.TurnContext || second["cache_control"] != nil {
+				t.Errorf("anthropic: second block %v", second)
+			}
+		})
+	p, err := New(Config{Provider: "anthropic", BaseURL: ant.URL, APIKey: "k"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.SendTurn(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+
+	oai := serve(t, 200, `{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{}}`,
+		func(_ *http.Request, body map[string]any) {
+			first := body["messages"].([]any)[0].(map[string]any)
+			if first["role"] != "system" || first["content"] != "be brief"+req.TurnContext {
+				t.Errorf("openai: system message %v", first)
+			}
+		})
+	p, err = New(Config{Provider: "openai-compatible", BaseURL: oai.URL, Model: "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.SendTurn(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+}

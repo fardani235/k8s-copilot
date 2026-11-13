@@ -74,8 +74,10 @@ func (o *openAI) SendTurn(ctx context.Context, req Request) (Response, error) {
 	} else {
 		body.MaxTokens = o.cfg.MaxTokens
 	}
-	if req.System != "" {
-		body.Messages = append(body.Messages, oaiMessage{Role: "system", Content: strptr(req.System)})
+	// Providers here cache by prefix match, so the per-request part goes
+	// last in the one system message.
+	if sys := req.System + req.TurnContext; sys != "" {
+		body.Messages = append(body.Messages, oaiMessage{Role: "system", Content: strptr(sys)})
 	}
 	for _, m := range req.Messages {
 		switch {

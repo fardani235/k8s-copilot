@@ -170,15 +170,24 @@ type Model struct {
 	copilotMax bool
 	transcript []chatItem
 	chat       viewport.Model
-	input      textinput.Model
-	busy       bool
-	spin       spinner.Model
-	turnCancel context.CancelFunc
-	events     chan agent.Event
-	closed     chan struct{}
-	wg         sync.WaitGroup
-	shutdown   sync.Once
-	activity   string
+	// chatScrolled is set while the reader is away from the end of the
+	// transcript; new output then leaves the view where it is.
+	chatScrolled bool
+	// chatStarts[i] is the first wrapped line of transcript entry i in the
+	// last render; chatDropped counts entries dropped from the front since.
+	// Together they keep a scrolled-up reader on the same text across a
+	// re-wrap (resize) or a trim of the oldest entries.
+	chatStarts  []int
+	chatDropped int
+	input       textinput.Model
+	busy        bool
+	spin        spinner.Model
+	turnCancel  context.CancelFunc
+	events      chan agent.Event
+	closed      chan struct{}
+	wg          sync.WaitGroup
+	shutdown    sync.Once
+	activity    string
 
 	// approval
 	pending *approval.Request
@@ -362,6 +371,10 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		return m.onKey(msg)
 
+	case tea.MouseMsg:
+		m.onMouse(msg)
+		return m, nil
+
 	case typesMsg:
 		m.types, m.typesErr, m.typesWarn = msg.types, msg.err, ""
 		if msg.warn != nil {
@@ -454,11 +467,18 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case agentEventMsg:
 		m.onAgentEvent(msg.ev)
 		var adopt tea.Cmd
-		if end, ok := msg.ev.(agent.EventToolEnd); ok {
-			switch end.Call.Name {
+		switch ev := msg.ev.(type) {
+		case agent.EventToolEnd:
+			switch ev.Call.Name {
 			case "get_metrics":
 				adopt = m.adoptMetrics()
 			case "get_findings":
+				adopt = m.adoptHealth()
+			}
+		case agent.EventHealthSnapshot:
+			// The request's snapshot may have read the cluster: an open
+			// health screen shows that same observation.
+			if ev.Done {
 				adopt = m.adoptHealth()
 			}
 		}

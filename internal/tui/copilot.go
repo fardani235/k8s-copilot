@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/fardani235/k8s-copilot/internal/agent"
@@ -39,6 +40,7 @@ type chatItem struct {
 func (m *Model) say(kind chatKind, text string) {
 	m.transcript = append(m.transcript, chatItem{kind, textutil.Sanitize(text)})
 	if len(m.transcript) > 2000 {
+		m.chatDropped += len(m.transcript) - 2000
 		m.transcript = m.transcript[len(m.transcript)-2000:]
 	}
 	m.renderChat()
@@ -49,34 +51,124 @@ func (m *Model) renderChat() {
 	if w <= 0 {
 		return
 	}
+	// Where a scrolled-up reader is, as an entry and a line within it.
+	anchor, within := -1, 0
+	if m.chatScrolled && len(m.chatStarts) > 0 {
+		off := m.chat.YOffset
+		i := sort.Search(len(m.chatStarts), func(i int) bool { return m.chatStarts[i] > off }) - 1
+		if i >= 0 {
+			anchor, within = i-m.chatDropped, off-m.chatStarts[i]
+			if anchor < 0 {
+				anchor, within = 0, 0 // that entry is gone: the oldest left
+			}
+		}
+	}
+	m.chatDropped = 0
+	starts := make([]int, 0, len(m.transcript))
 	var b strings.Builder
+	line := 0
 	for i, it := range m.transcript {
 		if i > 0 {
 			b.WriteByte('\n')
+			line++
 		}
+		starts = append(starts, line)
+		var piece string
 		switch it.kind {
 		case chatUser:
-			b.WriteString("\n" + stKey.Render("you") + "\n" + wrap(it.text, w))
+			piece = "\n" + stKey.Render("you") + "\n" + wrap(it.text, w)
 		case chatAssistant:
-			b.WriteString("\n" + stHeader.Render("copilot") + "\n" + wrap(it.text, w))
+			piece = "\n" + stHeader.Render("copilot") + "\n" + wrap(it.text, w)
 		case chatTool:
-			b.WriteString(stDim.Render(wrap("· "+it.text, w)))
+			piece = stDim.Render(wrap("· "+it.text, w))
 		case chatToolErr:
-			b.WriteString(stWarn.Render(wrap("· "+it.text, w)))
+			piece = stWarn.Render(wrap("· "+it.text, w))
 		case chatNotice:
-			b.WriteString(stDim.Render(wrap(it.text, w)))
+			piece = stDim.Render(wrap(it.text, w))
 		case chatWarn:
-			b.WriteString(stBad.Render(wrap("! "+it.text, w)))
+			piece = stBad.Render(wrap("! "+it.text, w))
 		case chatGood:
-			b.WriteString(stGood.Render(wrap("✓ "+it.text, w)))
+			piece = stGood.Render(wrap("✓ "+it.text, w))
 		}
+		b.WriteString(piece)
+		line += strings.Count(piece, "\n")
 	}
+	m.chatStarts = starts
 	m.chat.SetContent(b.String())
-	m.chat.GotoBottom()
+	// Follow new output only if the reader was at the end. Someone reading
+	// older output is not pulled away mid-sentence, nor moved by a re-wrap;
+	// sending a message (ask) brings the view back.
+	switch {
+	case !m.chatScrolled:
+		m.chat.GotoBottom()
+	case anchor >= 0 && anchor < len(starts):
+		end := m.chat.TotalLineCount()
+		if anchor+1 < len(starts) {
+			end = starts[anchor+1]
+		}
+		// SetYOffset clamps: never past the end of a pane that grew.
+		m.chat.SetYOffset(min(starts[anchor]+within, end-1))
+	default:
+		m.chat.SetYOffset(m.chat.YOffset)
+	}
+	m.chatScrolled = !m.chat.AtBottom()
+}
+
+// scrollChat moves the transcript and records whether the reader has left
+// the end, so that new output does not pull them back.
+func (m *Model) scrollChat(move func(*viewport.Model)) {
+	move(&m.chat)
+	m.chatScrolled = !m.chat.AtBottom()
+}
+
+// overCopilot says whether a terminal cell is inside the copilot pane, its
+// frame included — in the split and maximized both, since copilotWidth is
+// the whole width when maximized.
+func (m *Model) overCopilot(x, y int) bool {
+	if !m.ready || !m.copilotOpen || m.width < MinWidth || m.height < MinHeight {
+		return false
+	}
+	// One header line above the panes, one footer line below.
+	return x >= m.width-m.copilotWidth() && x < m.width && y >= 1 && y <= m.height-2
+}
+
+// onMouse routes the wheel by the pointer, not by focus: over the copilot
+// pane it scrolls the transcript, anywhere else nothing moves. The approval
+// dialog is modal, so while it shows the mouse does nothing at all.
+func (m *Model) onMouse(msg tea.MouseMsg) {
+	if m.pending != nil && !m.modal.hidden {
+		return
+	}
+	if msg.Action != tea.MouseActionPress || !m.overCopilot(msg.X, msg.Y) {
+		return
+	}
+	switch msg.Button { //nolint:exhaustive
+	case tea.MouseButtonWheelUp:
+		m.scrollChat(func(v *viewport.Model) { v.ScrollUp(v.MouseWheelDelta) })
+	case tea.MouseButtonWheelDown:
+		m.scrollChat(func(v *viewport.Model) { v.ScrollDown(v.MouseWheelDelta) })
+	}
+}
+
+// chatRange is " · first–last/total" when the transcript is longer than the
+// pane, else "".
+func (m *Model) chatRange() string {
+	total, h := m.chat.TotalLineCount(), m.chat.Height
+	if len(m.transcript) == 0 || h <= 0 || total <= h {
+		return ""
+	}
+	first := m.chat.YOffset + 1
+	last := min(m.chat.YOffset+h, total)
+	return fmt.Sprintf(" · %d–%d/%d", first, last, total)
 }
 
 func (m *Model) viewCopilot(w, h int) string {
 	title := "copilot"
+	// The visible range comes before the provider name, so that a narrow
+	// pane cuts the name, not the range; with no room for it, it is left out.
+	if r := m.chatRange(); r != "" && lipWidth(title+r) <= w {
+		title += stDim.Render(r)
+	}
 	if m.deps.Agent != nil {
 		title += stDim.Render(" · " + m.deps.Agent.ProviderName())
 	}
@@ -142,10 +234,32 @@ func (m *Model) onCopilotKey(msg tea.KeyMsg) tea.Cmd {
 		}
 		m.leaveCopilot()
 		return nil
-	case "pgup", "pgdown", "ctrl+u", "ctrl+d":
-		var cmd tea.Cmd
-		m.chat, cmd = m.chat.Update(msg)
-		return cmd
+	// Transcript scrolling. home and end stay with the input, where they
+	// move the caret.
+	case "up":
+		m.scrollChat(func(v *viewport.Model) { v.ScrollUp(1) })
+		return nil
+	case "down":
+		m.scrollChat(func(v *viewport.Model) { v.ScrollDown(1) })
+		return nil
+	case "pgup":
+		m.scrollChat(func(v *viewport.Model) { v.PageUp() })
+		return nil
+	case "pgdown":
+		m.scrollChat(func(v *viewport.Model) { v.PageDown() })
+		return nil
+	case "ctrl+u":
+		m.scrollChat(func(v *viewport.Model) { v.HalfPageUp() })
+		return nil
+	case "ctrl+d":
+		m.scrollChat(func(v *viewport.Model) { v.HalfPageDown() })
+		return nil
+	case "ctrl+home":
+		m.scrollChat(func(v *viewport.Model) { v.GotoTop() })
+		return nil
+	case "ctrl+end":
+		m.scrollChat(func(v *viewport.Model) { v.GotoBottom() })
+		return nil
 	case "ctrl+l":
 		if m.deps.Agent == nil {
 			return nil
@@ -155,6 +269,7 @@ func (m *Model) onCopilotKey(msg tea.KeyMsg) tea.Cmd {
 			return nil
 		}
 		m.transcript = nil
+		m.chatScrolled, m.chatStarts, m.chatDropped = false, nil, 0
 		m.renderChat()
 		return nil
 	case "enter":
@@ -177,6 +292,9 @@ func (m *Model) onCopilotKey(msg tea.KeyMsg) tea.Cmd {
 // ask starts an agent turn on its own goroutine. The UI stays live; results
 // arrive as events.
 func (m *Model) ask(text string) tea.Cmd {
+	// Sending is the one moment the view returns to the end, so the
+	// question is visible even if the user was reading older output.
+	m.chatScrolled = false
 	m.say(chatUser, text)
 	m.busy, m.activity = true, ""
 	ctx, cancel := context.WithCancel(m.ctx)
@@ -200,6 +318,11 @@ func (m *Model) onAgentEvent(ev agent.Event) {
 	switch ev := ev.(type) {
 	case agent.EventText:
 		m.say(chatAssistant, strings.TrimSpace(ev.Text))
+	case agent.EventHealthSnapshot:
+		m.activity = ""
+		if !ev.Done {
+			m.activity = "reading cluster health"
+		}
 	case agent.EventToolStart:
 		name := textutil.Truncate(textutil.OneLine(textutil.Sanitize(ev.Call.Name)), 40)
 		m.activity = name

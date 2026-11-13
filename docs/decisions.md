@@ -509,6 +509,149 @@ the interactive checks against a live cluster (tasks 5.3, 5.4) were not run —
 creating workloads in the cluster was not permitted to this session — and are
 listed in docs/testing.md for a human.
 
+## Copilot findings context and scroll (`openspec/changes/copilot-findings-context-and-scroll`)
+
+The full reasoning is in that change's `design.md` (D1–D6).
+
+### K-46 — The health snapshot goes in the system context, once per request
+Every copilot request carries a bounded snapshot of the current classified
+findings: `kube.Cluster.HealthObservation(ctx, kube.AnyFallback,
+kube.HealthFreshFor)` → `health.Observe` → `Report.Text(now,
+agent.HealthSnapshotBytes)`, the exact path of `get_findings`, so it is the
+health screen's report and not a second classification. It is taken once,
+before the first model call, within `agent.HealthSnapshotTimeout` (10 s), and
+appended to the system context of every model call of that request. It is
+never written to the conversation history. On a read error or a timeout —
+including a source that ignores its context — the block says "cluster health
+snapshot unavailable: <reason>; call get_findings to read it now, and do not
+infer health from listings", and the request goes ahead. The system prompt
+tells the model to answer "what is broken?", "what is wrong?" and "is the
+cluster healthy?" from the snapshot without listing resources, and to call
+`get_findings` when the snapshot left findings out, is unavailable or
+missing, or is old and the user asks for the current state. The rule that an
+unwatched class is never healthy is unchanged.
+
+*Rejected:* **a synthetic user message** carrying the snapshot — simpler, but
+it stores a fresh ~6 KB copy in the history on every request, hastens the
+history budget's eviction, and leaves old snapshots in the conversation
+looking current and looking like something the user said; **a tool result**
+(a pre-made `get_findings` call) — a tool result needs a tool call, and a
+model that does not make the call is the problem being solved. Also
+rejected: a keyword filter that attaches the snapshot only to questions that
+look like health questions (wrong in both directions), and making the 6 KB
+budget or the 10 s wait configuration.
+
+*Departures recorded:*
+- `agent.Config` also has `SnapshotTimeout` (0 means `HealthSnapshotTimeout`)
+  so the timeout path is testable in milliseconds. It is not a configuration
+  key or flag; `cmd/k8s-copilot` leaves it at zero.
+- `Snapshot` takes the request's `Focus` as well as the context, and the
+  observation is asked for with the health screen's fallback — the focus's
+  namespace (the browser's), `kube.AllNamespaces` for all namespaces, and
+  `kube.AnyFallback` only when the focus has no usable namespace — not
+  `AnyFallback` always as the design and task 2.1 said. With a cold cache
+  and cluster-wide reads refused, `AnyFallback` read the kube context's
+  default namespace: the model was told classes were forbidden that the
+  screen showed as watched in `shop`, and the screen then read again (K-48).
+- The snapshot is not appended to `Request.System` but sent in a new
+  `llm.Request.TurnContext`, after the prompt-cache breakpoint: its age line
+  changes on every request and would otherwise make the whole cached prefix
+  a cache write each time (K-48). It is still system context, not a message.
+- An empty snapshot is stated as unavailable, like an error.
+- The agent emits `EventHealthSnapshot` before and after taking it; the
+  pane shows "reading cluster health" meanwhile, and an open health screen
+  takes up the observation afterwards (K-48).
+- The Trust rules name the snapshot as cluster data: names and event
+  messages in it are written by whoever can write to the cluster, and it is
+  not a tool result, which is all the old rule covered (K-48).
+
+### K-47 — The wheel is routed by pointer; keys by focus; a range, not a bar
+The program runs with `tea.WithMouseCellMotion()` (wheel and clicks, no
+all-motion traffic). `tui.Model` handles `tea.MouseMsg` before anything
+else: while the approval dialog shows, every mouse event is ignored; a wheel
+press whose cell is inside the copilot pane — `x ≥ width − copilotWidth()`,
+which is the whole width when maximized, and between the header and footer
+lines — scrolls the transcript three lines; anything else moves nothing.
+With the pane focused, `↑`/`↓` move one line, `pgup`/`pgdown` a page,
+`ctrl+u`/`ctrl+d` half a page, `ctrl+home`/`ctrl+end` to either end; `home`
+and `end` stay with the input's caret. The transcript follows new output
+only while the reader is at its end (`chatScrolled`); sending a message
+returns it to the end. The title shows `· first–last/total` while the
+transcript is longer than the pane, ahead of the provider name so a narrow
+pane cuts the name, and leaves it out when even `copilot` and the range do
+not fit.
+
+*Rejected:* **a focus-routed wheel** (the wheel scrolls whichever pane has
+the keyboard) — turning the wheel over a pane is a request to scroll that
+pane, and having to `tab` in first is exactly what made the transcript look
+unscrollable; **a scrollbar column** — the transcript is hard-wrapped to the
+pane, and a column costs width in the narrowest pane, where it matters most;
+a range says exactly which slice of the wrapped transcript is in view.
+Also rejected: auto-scrolling on every update (pulls the reader away
+mid-sentence); a percentage (less exact than the range).
+
+*Departures recorded:* the follow state is a flag kept across renders rather
+than `AtBottom()` read before each `SetContent` as the design sketched —
+`layout()` changes the viewport's height before re-rendering, so a reader at
+the end of a pane that just got shorter would no longer be "at the bottom"
+and would stop following. The wheel calls the viewport's `ScrollUp`/
+`ScrollDown` with its `MouseWheelDelta` directly instead of passing the
+message to `viewport.Update`, so a shift+wheel does not scroll a hard-wrapped
+transcript sideways. A scrolled-up reader's place is kept as a transcript
+entry and a line within it, not a line number, so a re-wrap (resize,
+maximize/restore) or the trimming of the oldest entries at 2000 leaves the
+same text in view; the offset is clamped so a pane that grew is never left
+past the end (K-48).
+
+*Accepted cost:* with mouse reporting on, a plain drag selects nothing in
+most terminals; `shift`+drag still does (README).
+
+### K-48 — Independent review before hand-over
+As with K-45, the change was handed to a separate reviewer with the code
+and the two specs — not the design rationale — and four promises: the
+snapshot is never a second classification, an unavailable snapshot is never
+silent, mouse events cannot move another pane or a modal, and scroll state
+survives resize and maximize/restore. Fakes only.
+
+**What held.** No second classifier (`HealthObservation` → `Observe` →
+`Report.Text`, the tool's path); `list` requests only; an error, a timeout,
+a source that ignores its context, a cancelled request all stated, and the
+request goes on; the snapshot taken once per request and never in the
+history; the wheel inert over the browser, header, footer, the pane's
+boundary column, a hidden pane, the approval dialog, a too-small terminal,
+and for clicks and releases, with the hit box matching the drawn frame;
+scroll keys only with the pane focused, `home`/`end` left to the caret; the
+range right, absent when the transcript fits or the title has no room; 60×16
+fits; `-race` and `vet` clean.
+
+**What did not, and was fixed** (each with a test that fails without the
+fix — checked by reverting it):
+
+| Finding | Fix |
+|---|---|
+| With a cold cache and cluster-wide reads refused, the snapshot fell back to the kube context's namespace, not the browser's: the model was told "forbidden" where the screen showed "namespace shop only", and the screen read again | The screen's fallback, from the request's focus. `main.TestSnapshotReadsTheScreensNamespace`, `main.TestSnapshotFallbackIsTheBrowsersNamespace` |
+| A read the snapshot made was not taken up by an open health screen (only a `get_findings` call was), so the model could see findings the screen did not, for up to a refresh — or until `r` with `refresh_interval` 0 | `agent.EventHealthSnapshot`; on its end the screen adopts the shared observation. `tui.TestHealthScreenAdoptsTheSnapshotsRead` |
+| The snapshot, with its changing age line, was inside the one prompt-cache breakpoint: every request rewrote the cached prefix | `llm.Request.TurnContext`, after the breakpoint. `llm.TestTurnContextFollowsTheCachedPrefix`, `agent.TestHealthSnapshotAppearsInEveryTurn` |
+| Cluster-written text (event messages, names) now reached the system context, but the Trust rule covered only tool results | A Trust rule naming the snapshot as cluster data. `agent.TestSystemPromptHealthSnapshotRules` |
+| A scrolled-up view in a pane that grew was left past the end: blank rows, a wrong range, and `↓` dead | Clamped. `tui.TestCopilotScrollIsClampedWhenThePaneGrows` |
+| A resize kept the line number, not the text, as the transcript re-wrapped; so did maximize/restore | Anchored to the entry. `tui.TestCopilotScrollKeepsItsPlaceAcrossRewrap` |
+| At 2000 entries, new output trimmed the oldest and shifted the text under a scrolled-up reader | The anchor counts trimmed entries. `tui.TestCopilotScrollSurvivesTrimming` |
+| An empty snapshot produced a header and nothing else | Stated as unavailable. `agent.TestHealthSnapshotFailureIsStated` |
+
+**Left as documented limits.** `HealthSnapshotTimeout` (10 s) equals
+`kube.HealthReadTimeout` (10 s per read), so one read that runs to its own
+bound makes the whole snapshot miss its wait and be stated unavailable,
+although the screen a moment later shows the other classes watched. The
+outcome is stated, the read completes in the background and fills the
+shared slot for the next request and the screen, and the pane now says
+"reading cluster health" while it waits; the 10 s is the value the design
+and task fixed, so it was not raised here. The `get_findings` tool
+description still says to use it for "is anything broken?" — the tool's
+text is unchanged on purpose (the design's non-goal), and the system prompt
+now says when to call it; at worst this costs a redundant call. The by-hand
+check (task 4.3) was not run: no model API key here (docs/testing.md,
+item 11).
+
 ## Not done, on purpose
 
 - No metrics history, trends, graphs or alerts; no source other than

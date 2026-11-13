@@ -328,6 +328,12 @@ COPILOT
   enter                     send your question
   esc                       cancel a running request / back to the browser
   ctrl+l                    start a new conversation
+  mouse wheel               scroll the transcript (pointer over the pane)
+  ↑ ↓                       scroll one line (copilot focused)
+  pgup pgdn, ctrl+u ctrl+d  scroll a page, half a page
+  ctrl+home ctrl+end        top / end of the transcript
+  New output does not move the transcript while you read further up;
+  sending does. shift+drag selects text in the terminal.
   The copilot always knows what you are looking at: namespace, type and the
   selected resource are sent with each question.
 

@@ -58,9 +58,13 @@ type Tool struct {
 
 // Request is one model call.
 type Request struct {
-	System   string
-	Messages []Message
-	Tools    []Tool
+	System string
+	// TurnContext is more system context that belongs to this request only
+	// (the cluster health snapshot). It follows System, and is kept apart
+	// so that System and the tool list stay a stable, cacheable prefix.
+	TurnContext string
+	Messages    []Message
+	Tools       []Tool
 }
 
 // Response is the model's next message.
