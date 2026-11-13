@@ -193,6 +193,63 @@ rollout, a namespace-only credential, a container at its memory limit, and
 removing metrics-server) change the cluster and are left for a human: see
 items 9 and 10 below.
 
+## Copilot findings context and scroll (`copilot-findings-context-and-scroll`)
+
+| Property | Verified by |
+|---|---|
+| The snapshot is in the system context of every model call of a request, taken once, bounded in time, never stored in the history | `agent.TestHealthSnapshotAppearsInEveryTurn` |
+| A failed, timed-out or stuck snapshot is stated as unavailable, with its reason, and the request goes ahead | `agent.TestHealthSnapshotFailureIsStated` |
+| The prompt says to answer health questions from the snapshot, when to call `get_findings`, and keeps the unwatched rule | `agent.TestSystemPromptHealthSnapshotRules`, `agent.TestSystemPromptExplainsFindings` |
+| The snapshot is the health report from the shared observation, within 6 KB, `list` only; a caller that gave up gets an error, not a report | `main.TestHealthSnapshotIsTheScreensReport`, `guard` (unchanged) |
+| The wheel scrolls the transcript only with the pointer over the pane, split or maximized, focus or not; never over the browser, header, footer, a hidden pane or the approval dialog | `tui.TestCopilotWheelScrollsOnlyOverThePane` |
+| `↑ ↓`, `pgup pgdown`, `ctrl+u ctrl+d`, `ctrl+home ctrl+end` move the transcript; `home`/`end` still move the caret | `tui.TestCopilotScrollKeys` |
+| New output follows a reader at the end and leaves a scrolled-up one where they are | `tui.TestCopilotScrollIsNotYankedByNewOutput` |
+| Sending returns the view to the end | `tui.TestSendingReturnsToTheEnd` |
+| The title's `first–last/total` is right, follows the view, is absent when it fits or has no room | `tui.TestCopilotScrollRangeIndicator` |
+| The pane, range included, fits 60×16, split and maximized | `tui.TestCopilotPaneFitsNarrowestTerminal` |
+| The reader's position survives resize and maximize/restore | `tui.TestCopilotScrollSurvivesResizeAndMaximize` |
+| The snapshot reads with the screen's fallback namespace; the screen reuses that read (review) | `main.TestSnapshotReadsTheScreensNamespace`, `main.TestSnapshotFallbackIsTheBrowsersNamespace` |
+| An open health screen takes up the snapshot's read; the pane says it is reading (review) | `tui.TestHealthScreenAdoptsTheSnapshotsRead` |
+| The snapshot is sent after the prompt-cache breakpoint; the cached prefix is the same on every request (review) | `llm.TestTurnContextFollowsTheCachedPrefix`, `agent.TestHealthSnapshotAppearsInEveryTurn` |
+| The snapshot is named as cluster data in the Trust rules; an empty one is stated (review) | `agent.TestSystemPromptHealthSnapshotRules`, `agent.TestHealthSnapshotFailureIsStated` |
+| A pane that grows never leaves the view past the end; re-wrap and trimming keep the same text in view (review) | `tui.TestCopilotScrollIsClampedWhenThePaneGrows`, `tui.TestCopilotScrollKeepsItsPlaceAcrossRewrap`, `tui.TestCopilotScrollSurvivesTrimming` |
+
+**The tests were checked against themselves** (task 4.2). Each behavior was
+reverted in turn: the snapshot taken but left out of the system context
+(`TestHealthSnapshotAppearsInEveryTurn` and `TestHealthSnapshotFailureIsStated`
+failed); `renderChat` always going to the bottom
+(`TestCopilotScrollIsNotYankedByNewOutput` and
+`TestCopilotScrollSurvivesResizeAndMaximize` failed); the wheel routed
+regardless of the pointer (`TestCopilotWheelScrollsOnlyOverThePane` failed).
+The independent review's fixes (decisions K-48) were reverted the same way,
+one at a time — `AnyFallback` instead of the screen's namespace, no adoption
+on the snapshot's end, the snapshot inside the cached system prompt, an
+empty snapshot passed through, no scroll anchor, the anchor's offset not
+clamped — and each failed its test. One survived alone: the clamp on the
+path with no anchor, which only runs before the first render and is
+covered by the anchored path's clamp.
+
+**Against a real API server** (this box's minikube, Kubernetes v1.35.1,
+metrics-server running), on 2026-11-13: `healthSnapshot` from
+`cmd/k8s-copilot`, run through a throwaway test (since deleted) against the
+current context. The first call read the cluster in 51 ms and returned
+5,111 bytes, under the 6,000 budget: the age line, all five classes
+*watched*, and 17 Warning-event findings (probe failures after a node
+reboot). The second call was served from the shared observation in under a
+millisecond, with identical text. `list` requests only.
+
+**Not done here** (task 4.3): the by-hand checks need a model API key, which
+this environment does not have, and a person at a real terminal to turn the
+wheel and drag. They are item 11 below. Notes on terminals for whoever runs
+it: most emulators (xterm, GNOME Terminal, Konsole, kitty, Alacritty,
+WezTerm, Windows Terminal) select with `shift`+drag while an application
+reports the mouse; macOS Terminal uses `fn`+drag; iTerm2 uses `option`+drag
+unless "Allow mouse reporting" is turned off; inside tmux, mouse events
+reach k8s-copilot only with `set -g mouse on`, and selection then is
+tmux's own (`shift`+drag passes it to the terminal). `ctrl+home`/`ctrl+end`
+are not delivered by some terminals and multiplexers (e.g. older tmux
+without `xterm-keys`); `pgup` and `pgdown` cover the same ground.
+
 ## Independent review
 
 Before hand-over the approval path was reviewed adversarially by a separate
@@ -279,6 +336,19 @@ a model API key being spent, and a change being approved on a cluster.
    the red row on the metrics screen. Then disable the addon and confirm the
    usage class says *not applicable* (or *unavailable* while it winds down) —
    never "no findings".
+
+11. **Copilot health answer and scrolling** (findings-context change, task
+   4.3). On a cluster with a known finding (item 9's crash loop will do),
+   open the copilot and ask "what is broken?". Expected: the answer names
+   that finding, and the transcript's tool lines show `get_findings` at most
+   — no `list_resources`, `get_events` or `describe_resource` discovery pass.
+   Ask something long enough to overflow the pane; turn the wheel over it
+   with the browser focused, then over the browser (nothing should move);
+   press `tab` and try `↑ ↓ pgup pgdn ctrl+u ctrl+d ctrl+home ctrl+end`, and
+   `home`/`end` in a half-typed question; watch the title's range follow.
+   Scroll up while an answer is still streaming in and confirm the view
+   stays put, then send and confirm it jumps to the end. Finally `shift`+drag
+   across the transcript and paste it somewhere. Record the terminal used.
 
 A throwaway target for 4–6:
 

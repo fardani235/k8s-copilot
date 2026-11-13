@@ -180,6 +180,9 @@ Both render one classification of one observation:
         ▼
  agent.Run (own goroutine)                      UI goroutine
    user msg = [browser focus] + question
+   system   = prompt (cached prefix)
+            + [health snapshot]                  once per request, ≤ 10 s, ≤ 6 KB, after
+                                                 the cache breakpoint; never in the history
    loop (≤ max_iterations):
      provider.SendTurn(history, tools) ──► text / tool calls
      for each tool call (≤ max_tool_calls):
@@ -206,6 +209,26 @@ Both render one classification of one observation:
   request. On hitting either, the request stops, the user is told, and every
   outstanding tool call gets a "not executed" result so the conversation stays
   valid.
+- **Health snapshot in the request context.** Before its first model call,
+  a request takes one snapshot of the cluster's classified findings and
+  sends it as system context with every model call of that request
+  (`llm.Request.TurnContext`: on Anthropic a second system block after the
+  cache breakpoint, elsewhere the end of the system message, so the prompt
+  and tools stay a cacheable prefix). Its source is
+  `kube.Cluster.HealthObservation(ctx, fallback, kube.HealthFreshFor)`, with
+  the screen's own fallback — the browser's namespace from the request's
+  focus, else `kube.AnyFallback` — so it is the observation behind the health
+  screen, reused when under 15 s old; an open health screen takes up a read
+  the snapshot made. It is classified by `health.Observe` and printed with
+  `Report.Text` under `agent.HealthSnapshotBytes` (6000): every class's state
+  and the reading's age always, findings cut and counted to fit. The wait is
+  bounded by `agent.HealthSnapshotTimeout` (10 s); on an error or timeout the
+  block says "cluster health snapshot unavailable: <reason>" and tells the
+  model to call `get_findings`, and the request goes ahead. The snapshot is
+  not stored in the conversation, so history holds only what was said, and
+  no old snapshot can be mistaken for a current one. A health question is
+  therefore answered from context already sent, without a `list_resources`
+  discovery pass.
 - **Off the UI goroutine**: the loop talks to the UI only through an event
   channel and the approval gate's channel. The browser stays usable while the
   model thinks and while a proposal waits.

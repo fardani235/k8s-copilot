@@ -71,6 +71,11 @@ func (a *anthropic) SendTurn(ctx context.Context, req Request) (Response, error)
 		// session: mark the prefix cacheable.
 		body.System = []antBlock{{Type: "text", Text: req.System, CacheControl: &antCache{Type: "ephemeral"}}}
 	}
+	if req.TurnContext != "" {
+		// After the breakpoint: it changes from one request to the next and
+		// must not invalidate the cached prefix.
+		body.System = append(body.System, antBlock{Type: "text", Text: req.TurnContext})
+	}
 	for _, t := range req.Tools {
 		body.Tools = append(body.Tools, antTool{Name: t.Name, Description: t.Description, InputSchema: t.Schema})
 	}

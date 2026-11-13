@@ -88,6 +88,27 @@ prints what is in effect (never the key).
 conversation. It is told what you are looking at (context, namespace, type,
 selected resource) with every question, so "this pod" just works.
 
+Scrolling the copilot's transcript:
+
+| Input | |
+|---|---|
+| mouse wheel over the copilot pane | three lines up / down — whichever pane has focus, split or maximized |
+| `↑ ↓` | one line (copilot focused) |
+| `pgup pgdn` | one page (copilot focused) |
+| `ctrl+u ctrl+d` | half a page (copilot focused) |
+| `ctrl+home ctrl+end` | top / end of the transcript (copilot focused) |
+
+`home` and `end` move the caret in the question you are typing. While the
+transcript is longer than the pane, its title shows the visible lines, e.g.
+`copilot · 41–73/210`. New output does not pull you back to the end while
+you are reading further up; sending a question does. The wheel over the
+browser, or while the approval dialog is showing, does nothing.
+
+Because k8s-copilot asks the terminal for mouse events, a plain drag no
+longer selects text in most terminals: hold `shift` while dragging to select
+and copy (on macOS Terminal and iTerm2, `fn` or `option` instead, depending
+on settings).
+
 ### Metrics
 
 `M`, from anywhere in the browser, shows how busy the cluster is right now —
@@ -200,9 +221,14 @@ HorizontalPodAutoscalers, PodDisruptionBudgets, Service endpoints. A crash-loopi
 under events; the two are not merged. There is no history and no
 notification: it is a picture of now, with its age on show.
 
-The copilot reads the same report (`get_findings`) — the one on the screen if
-it is open — so "what is broken?" gets the findings you see, and it is told
-never to call a class healthy that was not watched.
+The copilot is given the same report with every question — at most 6 KB of
+it (every class's state and the reading's age always, findings cut and
+counted to fit), from the observation the screen uses — so "what is broken?"
+is answered from the findings you see, without first listing pods, nodes and
+events. When the snapshot left findings out, could not be taken in 10 s, or
+is old and you ask for the current state, it reads the report again with
+`get_findings`. It is told never to call a class healthy that was not
+watched.
 
 ### Changes
 

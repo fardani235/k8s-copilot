@@ -12,8 +12,10 @@ import (
 	"os"
 	"os/user"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
 
@@ -21,6 +23,7 @@ import (
 	"github.com/fardani235/k8s-copilot/internal/approval"
 	"github.com/fardani235/k8s-copilot/internal/audit"
 	"github.com/fardani235/k8s-copilot/internal/config"
+	"github.com/fardani235/k8s-copilot/internal/health"
 	"github.com/fardani235/k8s-copilot/internal/kube"
 	"github.com/fardani235/k8s-copilot/internal/llm"
 	"github.com/fardani235/k8s-copilot/internal/tools"
@@ -110,11 +113,15 @@ func run(args []string, getenv func(string) string, stdout, stderr io.Writer) in
 			Info:     cluster.Info,
 			Approver: approver(),
 			Session:  randomID(),
+			Snapshot: healthSnapshot(cluster),
 		})
 	}
 
 	model := tui.New(deps)
-	_, err = tea.NewProgram(model, tea.WithAltScreen()).Run()
+	_, err = tea.NewProgram(model, tea.WithAltScreen(),
+		// Wheel and clicks, without the traffic of all-motion reporting:
+		// the wheel scrolls the copilot transcript under the pointer.
+		tea.WithMouseCellMotion()).Run()
 	// Let a proposal that was still waiting be recorded as cancelled.
 	model.Shutdown()
 	if err != nil {
@@ -153,6 +160,38 @@ func auditCommand(cmd, path string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// healthSnapshot gives the copilot the health screen's report for every
+// request: the same shared observation (reused while under
+// kube.HealthFreshFor), the same classification, under the snapshot's
+// budget. It only reads.
+func healthSnapshot(cluster *kube.Cluster) func(context.Context, agent.Focus) (string, error) {
+	return func(ctx context.Context, focus agent.Focus) (string, error) {
+		obs := cluster.HealthObservation(ctx, snapshotFallback(focus), kube.HealthFreshFor)
+		// A caller that stopped waiting gets an observation of abandoned
+		// reads; say that it timed out rather than hand it on as a report.
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		return health.Observe(obs).Text(time.Now(), agent.HealthSnapshotBytes), nil
+	}
+}
+
+// snapshotFallback is the namespace the health screen falls back to for a
+// refused cluster-wide read — the browser's — so that the snapshot and the
+// screen ask for, and share, the same observation. With no usable namespace
+// in the focus (none yet, or a cluster-scoped type on show), it is whatever
+// the latest observation used.
+func snapshotFallback(focus agent.Focus) string {
+	switch {
+	case focus.AllNamespaces:
+		return kube.AllNamespaces
+	case focus.Namespace != "" && len(validation.IsDNS1123Label(focus.Namespace)) == 0:
+		return focus.Namespace
+	default:
+		return kube.AnyFallback
+	}
 }
 
 // approver names who is at the keyboard, for the audit entry.

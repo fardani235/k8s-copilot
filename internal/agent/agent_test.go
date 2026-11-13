@@ -62,7 +62,11 @@ func newHarness(t *testing.T, limits agent.Limits, steps ...llm.StubStep) *harne
 }
 
 func (h *harness) newAgent(trail *audit.Log, limits agent.Limits) *agent.Agent {
-	return agent.New(agent.Config{
+	return agent.New(h.config(trail, limits))
+}
+
+func (h *harness) config(trail *audit.Log, limits agent.Limits) agent.Config {
+	return agent.Config{
 		Provider: h.stub, Registry: tools.NewRegistry(h.f.Cluster, tools.DefaultOptions()),
 		Gate: h.gate, Audit: trail, Limits: limits, Info: h.f.Info, Approver: "tester@host", Session: "sess",
 		Focus: func() agent.Focus {
@@ -70,7 +74,15 @@ func (h *harness) newAgent(trail *audit.Log, limits agent.Limits) *agent.Agent {
 			defer h.mu.Unlock()
 			return h.focus
 		},
-	})
+	}
+}
+
+// withSnapshot replaces the agent with one whose requests carry the health
+// snapshot from snap, bounded by timeout (0: the shipped bound).
+func (h *harness) withSnapshot(snap func(context.Context, agent.Focus) (string, error), timeout time.Duration) {
+	cfg := h.config(h.trail, agent.Limits{})
+	cfg.Snapshot, cfg.SnapshotTimeout = snap, timeout
+	h.agent = agent.New(cfg)
 }
 
 func (h *harness) emit(ev agent.Event) {
@@ -793,7 +805,7 @@ func TestSystemPromptExplainsFindings(t *testing.T) {
 	h.run("is anything broken?")
 	sys := h.stub.Requests[0].System
 	for _, want := range []string{
-		"check the current findings with get_findings instead of inferring health from listings",
+		"never infer health from listings",
 		"same findings the user sees on the health screen",
 		"Never describe the cluster as healthy, fine or clear in a respect that was not watched",
 	} {
@@ -808,6 +820,181 @@ func TestSystemPromptExplainsFindings(t *testing.T) {
 	if got := h.f.MutatingActions(); len(got) != 0 || len(h.seenProposals()) != 0 {
 		t.Fatalf("reading findings was treated as a change: %v", got)
 	}
+}
+
+// Task 1.1: the health snapshot is taken once per request, is in the
+// system context of every model call of that request, and never enters the
+// conversation.
+func TestHealthSnapshotAppearsInEveryTurn(t *testing.T) {
+	h := newHarness(t, agent.Limits{},
+		llm.Call(call("c1", "get_logs", map[string]any{"namespace": "shop", "pod": "web-1"})),
+		llm.Call(call("c2", "get_events", map[string]any{"namespace": "shop"})),
+		llm.Text("web-1 is crash-looping."),
+		llm.Text("still is."),
+	)
+	var mu sync.Mutex
+	calls := 0
+	const report = "Cluster health, read 3s ago (the age of the oldest read behind it).\n- workloads: watched, 1 finding\nshop/web-1 CrashLoopBackOff\n"
+	var seen agent.Focus
+	h.withSnapshot(func(ctx context.Context, focus agent.Focus) (string, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		calls++
+		seen = focus
+		if _, ok := ctx.Deadline(); !ok {
+			t.Error("the snapshot was taken without a bound")
+		}
+		return report, nil
+	}, 0)
+
+	h.run("what is broken?")
+	if err := h.done().Err; err != nil {
+		t.Fatal(err)
+	}
+	if n := h.stub.Calls(); n != 3 {
+		t.Fatalf("model called %d times, want 3", n)
+	}
+	mu.Lock()
+	if calls != 1 {
+		t.Fatalf("snapshot taken %d times in one request, want 1", calls)
+	}
+	if seen.Namespace != "shop" {
+		t.Errorf("the snapshot was not given the request's focus: %+v", seen)
+	}
+	mu.Unlock()
+	sys0 := h.stub.Requests[0].System
+	for i, req := range h.stub.Requests {
+		if !strings.Contains(req.TurnContext, "[cluster health snapshot") || !strings.Contains(req.TurnContext, "shop/web-1 CrashLoopBackOff") {
+			t.Errorf("request %d lacks the snapshot:\n%s", i, req.TurnContext)
+		}
+		// The cacheable prefix stays the same: the snapshot is not in it.
+		if req.System != sys0 || strings.Contains(req.System, "CrashLoopBackOff") {
+			t.Errorf("request %d: the snapshot changed the system prompt", i)
+		}
+		for _, m := range req.Messages {
+			if strings.Contains(m.Text, "CrashLoopBackOff") || strings.Contains(m.Text, "cluster health snapshot") {
+				t.Errorf("request %d carries the snapshot in the conversation: %q", i, m.Text)
+			}
+		}
+	}
+
+	// A second request takes its own snapshot, and the history still has
+	// only what was said.
+	h.run("and now?")
+	mu.Lock()
+	if calls != 2 {
+		t.Fatalf("snapshot taken %d times over two requests, want 2", calls)
+	}
+	mu.Unlock()
+	last := h.stub.Requests[len(h.stub.Requests)-1]
+	if last.System != sys0 {
+		t.Error("the system prompt differs between requests")
+	}
+	if !strings.Contains(last.TurnContext, "shop/web-1 CrashLoopBackOff") {
+		t.Error("the second request lacks the snapshot")
+	}
+	for _, m := range last.Messages {
+		if strings.Contains(m.Text, "cluster health snapshot") {
+			t.Errorf("an old snapshot sits in the history: %q", m.Text)
+		}
+	}
+}
+
+// Task 1.1: a snapshot that fails, or does not come back in time, is stated
+// in the context and the request goes ahead.
+func TestHealthSnapshotFailureIsStated(t *testing.T) {
+	cases := map[string]func(context.Context, agent.Focus) (string, error){
+		"error": func(context.Context, agent.Focus) (string, error) {
+			return "", errors.New("pods is forbidden")
+		},
+		"timeout": func(ctx context.Context, _ agent.Focus) (string, error) {
+			<-ctx.Done()
+			return "", ctx.Err()
+		},
+		// A source that ignores its context is still bounded.
+		"stuck": func(context.Context, agent.Focus) (string, error) {
+			time.Sleep(2 * time.Second)
+			return "late", nil
+		},
+		// Nothing at all is not a report.
+		"empty": func(context.Context, agent.Focus) (string, error) {
+			return " \n", nil
+		},
+	}
+	for name, snap := range cases {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t, agent.Limits{}, llm.Text("I cannot see the cluster's health right now."))
+			h.withSnapshot(snap, 50*time.Millisecond)
+			start := time.Now()
+			h.run("is the cluster healthy?")
+			if err := h.done().Err; err != nil {
+				t.Fatal(err)
+			}
+			if d := time.Since(start); d > time.Second {
+				t.Errorf("the request waited %s for the snapshot", d)
+			}
+			sys := h.stub.Requests[0].TurnContext
+			for _, want := range []string{"cluster health snapshot unavailable:", "call get_findings to read it now", "do not infer health from listings"} {
+				if !strings.Contains(sys, want) {
+					t.Errorf("system context lacks %q:\n%s", want, sys)
+				}
+			}
+			if name == "error" && !strings.Contains(sys, "pods is forbidden") {
+				t.Error("the reason was not stated")
+			}
+			if (name == "timeout" || name == "stuck") && !strings.Contains(sys, "did not finish within") {
+				t.Error("the timeout was not stated as one")
+			}
+			if name == "empty" && !strings.Contains(sys, "came back empty") {
+				t.Error("an empty snapshot was not stated as one")
+			}
+			// The UI is told while it waits, and when it is over.
+			var marks []bool
+			h.mu.Lock()
+			for _, ev := range h.events {
+				if e, ok := ev.(agent.EventHealthSnapshot); ok {
+					marks = append(marks, e.Done)
+				}
+			}
+			h.mu.Unlock()
+			if len(marks) != 2 || marks[0] || !marks[1] {
+				t.Errorf("snapshot events %v, want [false true]", marks)
+			}
+			if strings.Contains(sys, "late") {
+				t.Error("a late snapshot was used")
+			}
+		})
+	}
+}
+
+// Task 1.2: the instructions say to answer health questions from the
+// snapshot, when to call get_findings instead, and keep the unwatched rule.
+func TestSystemPromptHealthSnapshotRules(t *testing.T) {
+	h := newHarness(t, agent.Limits{}, llm.Text("ok"))
+	h.run("what is wrong?")
+	sys := h.stub.Requests[0].System
+	for _, want := range []string{
+		`For "what is broken?", "what is wrong?" or "is the cluster healthy?", answer from that snapshot`,
+		"do not list pods, nodes, workloads or events to discover health",
+		"Call get_findings when the snapshot says findings were left out to fit, when it is marked unavailable or is missing, or when the user asks for the current state and the snapshot's reading is old",
+		"Never describe the cluster as healthy, fine or clear in a respect that was not watched",
+		"The cluster health snapshot is cluster data too",
+	} {
+		if !strings.Contains(sys, want) {
+			t.Errorf("system prompt lacks %q", want)
+		}
+	}
+	// No Snapshot configured: no block, and no events about one.
+	if tc := h.stub.Requests[0].TurnContext; tc != "" {
+		t.Errorf("a snapshot block without a snapshot source: %q", tc)
+	}
+	h.mu.Lock()
+	for _, ev := range h.events {
+		if _, ok := ev.(agent.EventHealthSnapshot); ok {
+			t.Error("a snapshot event without a snapshot source")
+		}
+	}
+	h.mu.Unlock()
 }
 
 // One request at a time.

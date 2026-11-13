@@ -1,5 +1,43 @@
 # Changelog
 
+## Unreleased — copilot findings context and scroll (`openspec/changes/copilot-findings-context-and-scroll`)
+
+### Added
+
+- **Health snapshot in every copilot request.** The current classified
+  findings — the health screen's report, from the same shared observation —
+  are attached to the system context of every request, at most 6 KB (every
+  class's state and the reading's age always; findings cut and counted to
+  fit) and within 10 s. "What is broken?" is answered from it without a
+  discovery pass over pods, nodes and events. If it cannot be taken, the
+  request says so and goes ahead; the model is told to call `get_findings`
+  and never to infer health from listings. The snapshot is not stored in the
+  conversation. It is read with the health screen's own fallback namespace
+  (the browser's), sent after the prompt-cache breakpoint so the cached
+  prefix stays stable, and an open health screen takes up any read it made.
+- **Scrollable copilot transcript.** The mouse wheel scrolls it while the
+  pointer is over the pane (split or maximized, whichever pane has focus);
+  with the pane focused, `↑`/`↓` scroll a line and `ctrl+home`/`ctrl+end` go
+  to either end, beside the existing `pgup`/`pgdown` and `ctrl+u`/`ctrl+d`.
+  The title shows the visible range (`copilot · 41–73/210`) while the
+  transcript is longer than the pane.
+
+### Changed
+
+- New copilot output no longer drags a scrolled-up view back to the end;
+  sending a question still returns it there. A scrolled-up view keeps the
+  same text in view across a resize, maximize/restore, or the trimming of
+  the oldest transcript entries.
+- `llm.Request` gains `TurnContext`, per-request system context sent after
+  the cacheable system prompt.
+- Mouse reporting is on, so a plain drag no longer selects text in most
+  terminals: use `shift`+drag.
+
+### Unchanged on purpose
+
+No new configuration, permission, dependency or write path:
+`internal/guard` passes untouched, `go.mod` is unchanged.
+
 ## Unreleased — health screen (`openspec/changes/add-cluster-health`)
 
 ### Added
