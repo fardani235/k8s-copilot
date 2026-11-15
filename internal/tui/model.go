@@ -152,6 +152,10 @@ type Model struct {
 	filtering bool
 	filterIn  textinput.Model
 	rows      []int // visible row indexes into table.Rows
+	// listClock numbers the running redraw timer of a listing with usage
+	// columns; listClockOn says one is running. See startListClock.
+	listClock   int
+	listClockOn bool
 
 	// sub-views
 	subj     subject
@@ -348,7 +352,9 @@ func (m *Model) loadList() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(m.ctx, 30*time.Second)
 		defer cancel()
-		tbl, err := m.deps.Cluster.List(ctx, t, ns, 0)
+		// Pods and nodes carry the usage overlay, from the readings the
+		// metrics screen and the copilot share.
+		tbl, err := m.deps.Cluster.ListWithUsage(ctx, t, ns, 0, kube.MetricsFreshFor)
 		return listMsg{seq, tbl, err}
 	}
 }
@@ -410,7 +416,10 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.table = nil
 			m.rows = nil
 		}
-		return m, nil
+		return m, m.startListClock()
+
+	case listClockMsg:
+		return m, m.onListClock(msg)
 
 	case tickMsg:
 		var cmd tea.Cmd

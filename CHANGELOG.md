@@ -1,5 +1,39 @@
 # Changelog
 
+## Unreleased — usage in the pods and nodes listings (`openspec/changes/overlay-metrics-in-listings`)
+
+### Added
+
+- **CPU and memory in the ordinary listings.** The pods listing gains `CPU`,
+  `%CPU/R`, `%CPU/L`, `MEM`, `%MEM/R`, `%MEM/L`; the nodes listing `CPU`,
+  `%CPU`, `MEM`, `%MEM` (of allocatable) — after their own columns, built by
+  the same functions as the metrics screen's cells, from the same shared
+  readings. One line above the table states the sample's age, keeps counting
+  with auto-refresh off, and marks old or held readings.
+- **No column when there is nothing to show.** If the metrics API is absent,
+  not answering, refused, rejects the credentials, takes more than 3 s, fails,
+  or was read for one namespace while the listing covers all, there are no
+  usage columns and the line says why (`Usage is unknown, not zero.`). A
+  column that would be all `—` is left out; a row without a sample shows `—`.
+- **`list_resources` returns the same table** for pods and nodes: same
+  columns, same values, same line.
+
+### Changed
+
+- The filter in the listing matches its own columns only, never a usage
+  figure. On a narrow pane the usage columns give way first (percentages,
+  then `MEM`, then `CPU`); names, status and age stay.
+- Browsing pods or nodes now reads usage through the shared metrics cache
+  (at most one read per 15 s, shared with the metrics screen and the
+  copilot). `kube.Cluster.ListWithUsage`, `kube.AttachUsage`,
+  `kube.Table.Overlay`, `metrics.PodUsageCells` and `metrics.NodeUsageCells`
+  are new; `kube.Cluster.List` is unchanged.
+
+### Unchanged on purpose
+
+No new permission, dependency, configuration or cluster-side installation,
+and no write path: `internal/guard` passes untouched, `go.mod` is unchanged.
+
 ## Unreleased — copilot findings context and scroll (`openspec/changes/copilot-findings-context-and-scroll`)
 
 ### Added

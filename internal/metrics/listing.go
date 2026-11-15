@@ -334,6 +334,44 @@ func lowerFirst(s string) string {
 	return strings.ToLower(s[:1]) + s[1:]
 }
 
+// --- usage cells ----------------------------------------------------------------
+
+// NodeUsageCells are a node's usage cells as the nodes listing writes them:
+// CPU, %CPU, MEM, %MEM, the percentages of allocatable. The ordinary nodes
+// listing's usage columns are built from this same function, so the two
+// cannot disagree. An unknown allocatable is written as unknown, never as
+// "none": every node has one.
+func NodeUsageCells(n *Node) [4]string { return nodeUsage(n).cells }
+
+type nodeCells struct {
+	cells          [4]string
+	cpuPct, memPct int
+	cpuOK, memOK   bool
+}
+
+func nodeUsage(n *Node) nodeCells {
+	const capKnown = false // an unknown allocatable is never "none"
+	var u nodeCells
+	var cpuCell, memCell string
+	cpuCell, u.cpuPct, u.cpuOK = pct(n.CPU, n.CPUAlloc, capKnown, "")
+	memCell, u.memPct, u.memOK = pct(n.Mem, n.MemAlloc, capKnown, "")
+	u.cells = [4]string{FormatCPU(n.CPU), cpuCell, FormatMem(n.Mem), memCell}
+	return u
+}
+
+// PodUsageCells are a pod's usage cells as the pods listing writes them:
+// CPU, %CPU/R, %CPU/L, MEM, %MEM/R, %MEM/L. A missing reading is NoData; a
+// measured zero is "0m" / "0"; a request or limit known not to be set is
+// "no req" / "no lim", and one that cannot be known is NoData. The ordinary
+// pods listing's usage columns are built from this same function.
+func PodUsageCells(p *Pod) [6]string {
+	cpuR, _, _ := pct(p.CPU, p.CPUReq, p.BoundsKnown, "no req")
+	cpuL, _, _ := pct(p.CPU, p.CPULim, p.BoundsKnown, "no lim")
+	memR, _, _ := pct(p.Mem, p.MemReq, p.BoundsKnown, "no req")
+	memL, _, _ := pct(p.Mem, p.MemLim, p.BoundsKnown, "no lim")
+	return [6]string{FormatCPU(p.CPU), cpuR, cpuL, FormatMem(p.Mem), memR, memL}
+}
+
 // --- nodes --------------------------------------------------------------------
 
 func (s *Snapshot) listNodes(l *Listing) {
@@ -368,14 +406,12 @@ func (s *Snapshot) listNodes(l *Listing) {
 		if n.Ready == "NotReady" {
 			name += " (NotReady)"
 		}
-		capKnown := false // an unknown allocatable is never "none"
-		cpuCell, cpuPct, cpuOK := pct(n.CPU, n.CPUAlloc, capKnown, "")
-		memCell, memPct, memOK := pct(n.Mem, n.MemAlloc, capKnown, "")
-		r.flag("CPU", cpuPct, cpuOK, "allocatable")
-		r.flag("memory", memPct, memOK, "allocatable")
+		u := nodeUsage(&n)
+		r.flag("CPU", u.cpuPct, u.cpuOK, "allocatable")
+		r.flag("memory", u.memPct, u.memOK, "allocatable")
 		r.Cells = []string{name,
-			FormatCPU(n.CPU), cpuCell, barCell(cpuPct, cpuOK),
-			FormatMem(n.Mem), memCell, barCell(memPct, memOK)}
+			u.cells[0], u.cells[1], barCell(u.cpuPct, u.cpuOK),
+			u.cells[2], u.cells[3], barCell(u.memPct, u.memOK)}
 		if showPods {
 			r.Cells = append(r.Cells, strconv.FormatInt(n.Pods.V, 10))
 		}
@@ -547,10 +583,6 @@ func (s *Snapshot) listPods(l *Listing) {
 	notRunning, silent, undescribed := 0, 0, 0
 	for _, p := range pods {
 		r := Row{Key: p.Key(), Namespace: p.Namespace, Name: p.Name}
-		cpuR, _, _ := pct(p.CPU, p.CPUReq, p.BoundsKnown, "no req")
-		cpuL, _, _ := pct(p.CPU, p.CPULim, p.BoundsKnown, "no lim")
-		memR, _, _ := pct(p.Mem, p.MemReq, p.BoundsKnown, "no req")
-		memL, _, _ := pct(p.Mem, p.MemLim, p.BoundsKnown, "no lim")
 		// Limits bind containers, not pods: one container at its limit is
 		// throttled or killed however much room its neighbours have. So the
 		// row is as hot as its hottest container, and says which.
@@ -567,7 +599,8 @@ func (s *Snapshot) listPods(l *Listing) {
 		if showNS {
 			r.Cells = append(r.Cells, p.Namespace)
 		}
-		r.Cells = append(r.Cells, p.Name, FormatCPU(p.CPU), cpuR, cpuL, FormatMem(p.Mem), memR, memL)
+		u := PodUsageCells(p)
+		r.Cells = append(append(r.Cells, p.Name), u[:]...)
 		if showNode {
 			node := p.Node
 			switch {

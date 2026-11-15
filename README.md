@@ -165,6 +165,36 @@ screen if it is open — so when you ask why something is slow it can check
 whether it is actually CPU-saturated or short of memory, and what it tells you
 matches what you see. There is no history: this is a picture of now.
 
+#### Usage in the pods and nodes listings
+
+The ordinary **pods** listing also shows `CPU`, `%CPU/R`, `%CPU/L`, `MEM`,
+`%MEM/R`, `%MEM/L`, and the **nodes** listing `CPU`, `%CPU`, `MEM`, `%MEM` (of
+allocatable), after their own columns. They are the metrics screen's own
+cells, from the same shared readings, so the same pod shows the same numbers
+in both places. One line above the table says how old they are
+(`CPU/MEM sampled 8s ago · 15s window`), and is marked when they are old or a
+failed refresh has left earlier readings standing in; the age keeps counting
+even with auto-refresh off.
+
+When the readings are not there — no metrics API, not answering, not allowed,
+credentials refused, too slow (a listing waits for them at most 3s), or read
+for one namespace while the listing covers all — there are **no usage columns
+at all**, and that line says why:
+
+```
+ pods · namespace shop · 3
+ No CPU/memory columns — Metrics are not available on this cluster. Usage is unknown, not zero.
+ NAME         STATUS   AGE
+```
+
+A column is only drawn if some row has a value for it: with requests and
+limits unreadable, the percentage columns are left out and the line says so.
+A pod without a sample (finished, or just started) shows `—`. The filter `/`
+matches the listing's own columns only, never a usage figure. On a narrow
+pane the usage columns give way first (percentages, then `MEM`, then `CPU`);
+names, status and age stay. The copilot's `list_resources` returns the same
+table and the same line.
+
 ### Health
 
 `H`, from anywhere in the browser, answers "is anything broken right now?" —

@@ -23,9 +23,10 @@ const (
 func (r *Registry) registerRead() {
 	r.add(&tool{
 		Spec: Spec{
-			Name:        "list_resources",
-			Description: "List resources of any type the cluster serves (including custom resources) as a kubectl-style table. Read-only.",
-			Tier:        Read,
+			Name: "list_resources",
+			Description: "List resources of any type the cluster serves (including custom resources) as a kubectl-style table. " +
+				"Pods and nodes also carry current CPU/memory usage columns, the same readings as get_metrics; when those cannot be read the result has no usage columns and says why — usage is then unknown, not zero. Read-only.",
+			Tier: Read,
 			Schema: schema(map[string]string{
 				"type":      strProp(typeDesc),
 				"namespace": strProp("Namespace to list in. Leave out to list across all namespaces."),
@@ -129,7 +130,9 @@ func (r *Registry) listResources(ctx context.Context, raw json.RawMessage) (stri
 	if err != nil {
 		return "", err
 	}
-	tbl, err := r.c.List(ctx, t, a.Namespace, a.Limit)
+	// Pods and nodes carry the same usage overlay the browser shows, from
+	// the same shared readings.
+	tbl, err := r.c.ListWithUsage(ctx, t, a.Namespace, a.Limit, kube.MetricsFreshFor)
 	if err != nil {
 		return "", explain(err, "list "+t.String())
 	}
@@ -149,6 +152,10 @@ func (r *Registry) listResources(ctx context.Context, raw json.RawMessage) (stri
 	if len(tbl.Rows) == 0 {
 		b.WriteString("(none — the list request succeeded and returned no resources)\n")
 		return b.String(), nil
+	}
+	if line, _ := tbl.Overlay.Line(time.Now()); line != "" {
+		// The browser's own words: how old the usage is, or why it is absent.
+		b.WriteString(textutil.OneLine(textutil.Sanitize(line)) + "\n")
 	}
 	b.WriteString(FormatTable(tbl))
 	return r.cap(b.String()), nil

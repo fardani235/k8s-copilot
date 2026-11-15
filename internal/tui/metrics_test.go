@@ -5,6 +5,7 @@ import (
 	"errors"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -460,10 +461,13 @@ func TestMetricsRefreshesItself(t *testing.T) {
 	}
 	tick := func() { u.send(tickMsg{}) }
 
-	// Not open: ticks do not touch the metrics API.
+	// Not open: the screen's own polling does not run. (The pods listing's
+	// usage columns come from the shared readings, which are still fresh,
+	// so a listing refresh asks the metrics API nothing either.)
+	listed := f.MetricsCalls()
 	tick()
-	if f.MetricsCalls() != 0 {
-		t.Fatal("metrics were read while the screen was closed")
+	if f.MetricsCalls() != listed || u.m.metrics.seq != 0 {
+		t.Fatalf("metrics were read while the screen was closed (%d → %d calls)", listed, f.MetricsCalls())
 	}
 	u.keys("M")
 	calls := f.MetricsCalls()
@@ -511,12 +515,16 @@ func TestMetricsRefreshesItself(t *testing.T) {
 // while it hangs, and is not drawn as an empty cluster meanwhile.
 //
 // (That other requests to the cluster carry on meanwhile is shown with a real
-// HTTP client in kube.TestMetricsOverTheWire: client-go's fake serialises
-// every call behind one lock, so it cannot be shown here.)
+// HTTP client in kube.TestMetricsOverTheWire and
+// kube.TestListWithUsageDoesNotWaitForASlowMetricsAPI: client-go's fake
+// serialises every call behind one lock, so here even the pods listing —
+// which now carries usage — waits behind the hanging read.)
 func TestMetricsSlowSourceDoesNotBlock(t *testing.T) {
 	f := loadedCluster()
 	release := make(chan struct{})
-	t.Cleanup(func() { close(release) })
+	var once sync.Once
+	answer := func() { once.Do(func() { close(release) }) }
+	t.Cleanup(answer)
 	f.Dynamic.PrependReactor("list", "*", func(a clienttesting.Action) (bool, runtime.Object, error) {
 		if a.GetResource().Group == "metrics.k8s.io" {
 			<-release
@@ -550,13 +558,19 @@ func TestMetricsSlowSourceDoesNotBlock(t *testing.T) {
 	u.keys("esc")
 	u.want("Reading metrics from the cluster…")
 	u.keys("esc")
-	u.want("pods · namespace shop · 3", "web-1")
+	u.want("pods · namespace shop")
+	u.wantNot("%CPU/R", "0m") // no usage is made up meanwhile
 	if u.m.view != vList {
 		t.Fatalf("view %v", u.m.view)
 	}
 	if waited := time.Since(start); waited > 3*time.Second {
 		t.Fatalf("five key presses took %v with the metrics API hanging", waited)
 	}
+
+	// Once the source answers, the listing lands with its usage columns.
+	answer()
+	u.send(u.m.loadList()())
+	u.want("pods · namespace shop · 3", "web-1", "CPU/MEM sampled", "%CPU/R")
 }
 
 // Too small, small, and narrow beside the copilot: readable, never broken.

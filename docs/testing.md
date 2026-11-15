@@ -250,6 +250,34 @@ tmux's own (`shift`+drag passes it to the terminal). `ctrl+home`/`ctrl+end`
 are not delivered by some terminals and multiplexers (e.g. older tmux
 without `xterm-keys`); `pgup` and `pgdown` cover the same ground.
 
+## Usage in the pods and nodes listings (`overlay-metrics-in-listings`)
+
+| Property | Verified by |
+|---|---|
+| The listings' usage cells are the metrics listing's own: `—` for a missing reading, `0m`/`0` for a measured zero, `no req`/`no lim` for a bound known absent, `—` for one unknown | `metrics.TestPodUsageCells`, `metrics.TestNodeUsageCells`, `metrics.TestListingsUseTheUsageCells` |
+| Core pods and nodes carry the columns after their own; other types and a CRD called `pods` do not | `kube.TestOverlayPodsAndNodesCarryUsage`, `tui.TestListingShowsUsageColumns` |
+| Absent / unavailable / denied / unauthenticated / timed out / failed metrics, and namespace readings under an all-namespaces listing: no columns, one line naming the cause | `kube.TestOverlayAbsentWhenReadingsAreNot`, `tui.TestListingWithoutUsageSaysWhy` |
+| A column of nothing but `—` is not drawn; `no req`/`no lim` columns stay; a row without a sample is `—` | `kube.TestOverlayDropsColumnsWithNothingKnown` |
+| A hanging metrics API costs a listing at most 3 s; the read carries on and the next listing has the columns, with no further request inside 15 s | `kube.TestListWithUsageDoesNotWaitForASlowMetricsAPI` (real HTTP), `tui.TestMetricsSlowSourceDoesNotBlock` |
+| A failing listing is reported as before | `kube.TestListWithUsageReturnsListErrors` |
+| The line's exact words: fresh, old, held (with cause), absent; `warn` for old and held | `kube.TestOverlayLine` |
+| The table still fills the pane under the line; paging accounts for it | `tui.TestListingWithUsageFillsThePane` |
+| The filter matches the listing's own fields only | `tui.TestListingFilterIgnoresUsage` |
+| A narrow pane drops `%…/R`, `%…/L`, `MEM`, `CPU` in that order, never name/status/age, never wider than the pane | `tui.TestListingNarrowPaneDropsUsageFirst` |
+| The stated age keeps counting with refresh off; the timer reads nothing; it retires off the listing | `tui.TestListingUsageAgeKeepsCounting` |
+| Refresh keeps the selected pod and updates its usage; `enter`/`l`/`e` and a namespace change work | `tui.TestListingRefreshKeepsSelectionAndKeys` |
+| `list_resources` carries the same columns and line; an unavailable source gives no columns and the browser's sentence; a row without a sample is `—` | `tools.TestListResourcesCarriesUsage`, `tools.TestListResourcesSaysWhyUsageIsAbsent` |
+| The copilot's cells equal the metrics screen's for every pod and node, at no extra metrics request | `tools.TestListResourcesMatchesTheMetricsScreen` |
+| End to end: the browser model and `list_resources` agree cell for cell, and neither has a usage column without a metrics API | `tui.TestBrowserAndCopilotListTheSameUsage` |
+| No new request path, raw HTTP request or write | `guard` (unchanged) |
+
+Two earlier tests changed with the behaviour (decisions K-53):
+`tui.TestMetricsRefreshesItself` (a tick with the metrics screen closed makes
+no *new* metrics request; the listing reads through the shared cache) and
+`tui.TestMetricsSlowSourceDoesNotBlock` (client-go's fake serialises calls, so
+the listing lands once the source answers; the 3 s bound is shown over real
+HTTP). Not yet watched against a live metrics-server; see item 7 below.
+
 ## Independent review
 
 Before hand-over the approval path was reviewed adversarially by a separate

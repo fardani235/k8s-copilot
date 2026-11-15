@@ -34,6 +34,10 @@ type Table struct {
 	// ServerColumns is true when the columns came from the API server's own
 	// printer (the same ones kubectl shows), false for the generic fallback.
 	ServerColumns bool
+	// Overlay describes the usage columns appended to a core pods or nodes
+	// listing by AttachUsage — or why there are none. nil for every other
+	// type, and for a plain List.
+	Overlay *UsageOverlay
 }
 
 // Row is one resource in a Table. Cells line up with Table.Columns.

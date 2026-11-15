@@ -13,6 +13,7 @@ internal/
     logs_events.go      pod logs, events
     describe.go         key-field summary, YAML
     metrics.go          the four reads behind the metrics screen, shared cache
+    overlay.go          usage columns on the pods/nodes listings (ListWithUsage, AttachUsage)
     health.go           typed, capped reads behind the health screen, shared observation
     write.go            MergePatch — the one write call in the program
     kubetest/           fake cluster for tests
@@ -121,6 +122,45 @@ same thing. Both are thin renderers of one model, fed by one read:
   as not current.
 - **Scope.** Cluster-wide. If pod metrics are refused cluster-wide, the screen
   falls back to the browser's namespace and says so.
+
+### Usage in the ordinary listings
+
+```
+ tui.loadList ─┐                                  ┌─ kube.Cluster.List (unchanged)
+               ├─► kube.Cluster.ListWithUsage ────┤        side by side
+ tools.list_resources ┘   (core pods, nodes only) └─ kube.Cluster.Metrics(ns, 15 s)  ≤ UsageOverlayWait (3 s)
+                                   │
+                                   ▼
+                    kube.AttachUsage(table, snapshot, ns)
+                      cells = metrics.PodUsageCells / NodeUsageCells  (the metrics listing's own)
+                      Table.Overlay = {From, drop ranks, Note, Snap}
+                                   │
+              ┌────────────────────┴─────────────────────┐
+     tui.viewList: Overlay.Line(now) above the     tools.FormatTable: Overlay.Line(now)
+     table; usage columns dropped first on a       before the table; every column
+     narrow pane; filter on Cells[:From]
+```
+
+- **One overlay, two consumers.** The browser and `list_resources` both call
+  `ListWithUsage`, so neither can have its own rule about when the columns
+  appear. `List` itself is untouched: every other type, and every test of it,
+  costs no metrics read.
+- **Same cells.** The overlay calls the constructors the metrics listing is
+  built from, so a value, a percentage and `—` are equal on both screens by
+  construction. Rows are matched by node name and `namespace/name`; a row not
+  in the readings (finished, newer than the sample) is `—`.
+- **Absence is a state, not a column.** No node/pod metrics, a refusal,
+  rejected credentials, a timeout, a failure, or pod readings of one namespace
+  under an all-namespaces listing: no columns, and `Overlay.Note` says why in
+  the metrics vocabulary (`SourceStatus.Headline`). A column whose every cell
+  is `—` is not added; `no req` / `no lim` are facts and stay.
+- **Budget.** The metrics read gets 3 s; it is detached in the cache and
+  carries on, so the next listing refresh finds it. The listing keeps its own
+  30 s.
+- **Freshness.** The overlay holds the snapshot, not a formatted age:
+  `Line(now)` uses `Snapshot.Freshness`, so held and old readings are marked
+  in the metrics screen's words. The browser runs a 5 s redraw timer
+  (`listClockMsg`, no cluster read) while such a listing is visible.
 
 ## The health screen
 

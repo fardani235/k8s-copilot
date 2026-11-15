@@ -652,11 +652,86 @@ now says when to call it; at worst this costs a redundant call. The by-hand
 check (task 4.3) was not run: no model API key here (docs/testing.md,
 item 11).
 
+## Usage in the pods and nodes listings (`openspec/changes/overlay-metrics-in-listings`)
+
+The ordinary pods and nodes listings, and `list_resources` for them, carry
+the metrics screen's usage columns.
+
+### K-49 — The overlay is a step in `internal/kube`, over the metrics listing's own cells
+`Cluster.ListWithUsage` is what both the browser and `list_resources` call;
+for core `pods` and `nodes` (group `""` only — a CRD called `pods` is not
+decorated) it reads the listing and `Cluster.Metrics` side by side and hands
+both to `AttachUsage`. `List` is unchanged, so no other type pays for a
+metrics read. The cells come from `metrics.PodUsageCells` /
+`metrics.NodeUsageCells`, which the metrics listing itself is now built
+from: "equal to the metrics screen" is the same function, not a careful
+copy. `Table.Overlay` records where the columns start, their drop ranks, the
+one line, and the snapshot (so the age is computed at render time). Rows are
+matched by node name and `namespace/name`; a row the readings do not contain
+is `—`. *Rejected:* in the TUI (the copilot would get another table); in
+`internal/metrics` (import cycle); in `List` (latency and failure modes for
+every type).
+
+### K-50 — 3 s for the readings; the read carries on
+`UsageOverlayWait = 3s` bounds the metrics read of one listing; the listing
+keeps its 30 s. The cache detaches the read (bounded by `MetricsTimeout`), so
+a slow source costs the first listing up to 3 s and yields "did not answer
+in time", and the next refresh finds the completed read. `maxAge` is
+`MetricsFreshFor` (15 s), shared with the metrics screen and the copilot.
+If the listing itself fails, the wait for the readings is cancelled.
+
+### K-51 — Absence is a state, never a column
+No columns when node/pod metrics are absent, unavailable, denied,
+unauthenticated, timed out or failed, or when pod readings of one namespace
+meet a listing of all namespaces (or another namespace). The note is
+`No CPU/memory columns — <SourceStatus.Headline>[: server's words for
+denied / unauthenticated / failed]. Usage is unknown, not zero.` — the same
+sentence in both consumers. A column whose every cell is `—` is not added;
+`no req`, `no lim`, `none` are facts and stay. When percentages are dropped
+for want of bounds, the note says so in the metrics listing's words ("Node
+capacity is unknown (…)", "Requests and limits are unknown (…)"). If no
+listed row has a sample at all, there are no columns, and the line says the
+metrics API returned no sample for any listed pod/node. An empty listing
+gets neither columns nor a line.
+
+*Decided while implementing:* the absence line is drawn as a warning except
+for a cluster with no metrics API at all — that is a standing fact of the
+cluster, and an amber line on every pods listing would train the eye to skip
+it. Held readings read `CPU/MEM NOT CURRENT: refresh failing since … —
+showing the readings from … ago (<cause>)`; old ones carry the metrics
+screen's `· OLD`; both are warnings.
+
+### K-52 — The listing stays a listing: filter, width, alignment
+The filter joins `Cells[:Overlay.From]`, so `/5` does not match a `15m`
+reading. On a narrow pane overlay columns are dropped, silently, until the
+line fits: `%…/R` (rank 4), `%…/L` (3), `MEM` (2), `CPU` (1), rightmost
+first among equals; the listing's own columns are never dropped, and when
+even they overflow the old clipping applies. The overlay's cells are
+right-aligned, as on the metrics screen. The page size (`pgup`/`pgdown`)
+accounts for the extra line. Selection, `enter`/`l`/`e`, sorting and the row
+tint are unchanged. The browser runs a 5 s `listClockMsg` redraw (no cluster
+read) while a listing with usage is visible, so the age counts and the
+`OLD`/held mark appears with refresh off.
+
+### K-53 — What the fake cannot show, and two tests that changed
+client-go's fake serialises every call behind one lock, so a hanging metrics
+reactor also stalls the fake's pods listing. "The listing returns within the
+budget while metrics hang" is therefore tested over real HTTP
+(`kube.TestListWithUsageDoesNotWaitForASlowMetricsAPI`, on the
+`apiServer` stand-in). Two existing TUI tests asserted the old behaviour and
+were adjusted, not weakened: `TestMetricsRefreshesItself` now checks that a
+tick with the metrics screen closed makes no *new* metrics request (the
+pods listing legitimately reads through the shared cache), and
+`TestMetricsSlowSourceDoesNotBlock` checks the interface stays live and then
+that the listing lands with its columns once the source answers. The
+`list_resources` description gained one sentence saying pods and nodes carry
+usage columns and what their absence means.
+
 ## Not done, on purpose
 
 - No metrics history, trends, graphs or alerts; no source other than
-  `metrics.k8s.io`; no CPU/MEM columns in the ordinary listings (argued for as
-  the next step in the metrics change's `design.md`).
+  `metrics.k8s.io`; usage columns only in the pods and nodes listings (K-49),
+  and no sorting of the ordinary listing by usage.
 - No delete / apply / patch / image / exec / cordon / drain (out of scope for
   this change).
 - No in-app context switching, no multi-cluster.

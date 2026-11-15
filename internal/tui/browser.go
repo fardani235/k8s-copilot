@@ -3,9 +3,11 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/fardani235/k8s-copilot/internal/kube"
 	"github.com/fardani235/k8s-copilot/internal/textutil"
@@ -58,7 +60,52 @@ func (m *Model) moveCursor(delta int) {
 
 func (m *Model) listRows() int {
 	_, h := m.browserInner()
-	return max(h-3, 1)
+	return max(h-3-m.usageLines(), 1)
+}
+
+// usageLines is the number of lines the usage overlay's line takes above the
+// table: one when the listing has something to say about usage.
+func (m *Model) usageLines() int {
+	if m.table == nil || len(m.table.Rows) == 0 {
+		return 0
+	}
+	if text, _ := m.table.Overlay.Line(time.Now()); text != "" {
+		return 1
+	}
+	return 0
+}
+
+// listClockMsg redraws a listing with usage columns so that the age it
+// states keeps counting, and the old/held mark appears on time, also with
+// periodic refresh switched off. It reads nothing from the cluster.
+type listClockMsg struct{ gen int }
+
+const listClockEvery = metricsClockEvery
+
+// startListClock starts the redraw timer when a listing with usage columns
+// is on screen and none is running.
+func (m *Model) startListClock() tea.Cmd {
+	if m.listClockOn || m.view != vList || m.table == nil || !m.table.Overlay.Present() {
+		return nil
+	}
+	m.listClock++
+	m.listClockOn = true
+	gen := m.listClock
+	return tea.Tick(listClockEvery, func(time.Time) tea.Msg { return listClockMsg{gen} })
+}
+
+// onListClock keeps the timer going while such a listing is the current
+// view, and retires it otherwise. Returning a message at all is what makes
+// the runtime redraw.
+func (m *Model) onListClock(msg listClockMsg) tea.Cmd {
+	if msg.gen != m.listClock {
+		return nil
+	}
+	if m.view != vList || m.table == nil || !m.table.Overlay.Present() {
+		m.listClockOn = false
+		return nil
+	}
+	return tea.Tick(listClockEvery, func(time.Time) tea.Msg { return msg })
 }
 
 func (m *Model) openNamespacePicker() {
@@ -189,7 +236,9 @@ func (m *Model) refilter() {
 	}
 	q := strings.ToLower(strings.TrimSpace(m.filter))
 	for i, r := range m.table.Rows {
-		if q == "" || strings.Contains(strings.ToLower(strings.Join(r.Cells, " ")), q) {
+		// The listing's own fields only: a usage figure must not make an
+		// otherwise non-matching row match.
+		if q == "" || strings.Contains(strings.ToLower(strings.Join(m.table.OwnCells(r), " ")), q) {
 			m.rows = append(m.rows, i)
 		}
 	}
@@ -288,6 +337,18 @@ func (m *Model) viewList(w, h int) string {
 		return b.String()
 	}
 
+	// The usage overlay's one line: how old the readings are, or why there
+	// are none.
+	extra := 0
+	if text, warn := m.table.Overlay.Line(time.Now()); text != "" {
+		st := stDim
+		if warn {
+			st = stWarn
+		}
+		b.WriteString(st.Render(clip(textutil.Sanitize(text), w)) + "\n")
+		extra = 1
+	}
+
 	// Column widths from the visible content.
 	cols := m.table.Columns
 	widths := make([]int, len(cols))
@@ -301,15 +362,20 @@ func (m *Model) viewList(w, h int) string {
 			}
 		}
 	}
+	shown, from := fitUsage(m.table.Overlay, widths, w)
 	line := func(cells []string) string {
 		var sb strings.Builder
-		for i := range cols {
+		for k, i := range shown {
 			c := ""
 			if i < len(cells) {
 				c = textutil.Sanitize(cells[i])
 			}
-			sb.WriteString(fit(c, widths[i]))
-			if i < len(cols)-1 {
+			if i >= from {
+				sb.WriteString(fitRight(c, widths[i]))
+			} else {
+				sb.WriteString(fit(c, widths[i]))
+			}
+			if k < len(shown)-1 {
 				sb.WriteString("  ")
 			}
 		}
@@ -317,7 +383,7 @@ func (m *Model) viewList(w, h int) string {
 	}
 	b.WriteString(stColHead.Render(clip(line(cols), w)) + "\n")
 
-	rows := max(h-2, 1)
+	rows := max(h-2-extra, 1)
 	if m.cursor < m.offset {
 		m.offset = m.cursor
 	}
@@ -339,6 +405,55 @@ func (m *Model) viewList(w, h int) string {
 		}
 	}
 	return b.String()
+}
+
+// fitUsage chooses the columns to draw in w cells. The listing's own columns
+// are always drawn (and clipped, as before, when even they overflow); usage
+// columns give way first, most droppable first and, among equals, the
+// rightmost. It returns the column indexes to draw and where the usage
+// columns start.
+func fitUsage(o *kube.UsageOverlay, widths []int, w int) (shown []int, from int) {
+	for i := range widths {
+		shown = append(shown, i)
+	}
+	if !o.Present() {
+		return shown, len(widths)
+	}
+	need := func() int {
+		total := 2 * (len(shown) - 1)
+		for _, i := range shown {
+			total += widths[i]
+		}
+		return total
+	}
+	for need() > w {
+		drop := -1
+		for k, i := range shown {
+			if i < o.From || i-o.From >= len(o.Columns) {
+				continue
+			}
+			if drop < 0 || o.Columns[i-o.From] >= o.Columns[shown[drop]-o.From] {
+				drop = k
+			}
+		}
+		if drop < 0 {
+			break
+		}
+		shown = append(shown[:drop:drop], shown[drop+1:]...)
+	}
+	return shown, o.From
+}
+
+// fitRight is fit, aligned right: numbers line up by their last digit.
+func fitRight(s string, w int) string {
+	if w <= 0 {
+		return ""
+	}
+	s = ansi.Truncate(s, w, "…")
+	if pad := w - lipgloss.Width(s); pad > 0 {
+		s = strings.Repeat(" ", pad) + s
+	}
+	return s
 }
 
 // rowStyle tints rows whose cells say something is wrong. Purely cosmetic.
